@@ -63,6 +63,21 @@ unpack:  lib/tbb/*
 version: 2019_U5
 
 
+ADAPTED SOURCE CODE
+========================================
+
+Third-party code that has been adapted into the Stan Math sources.
+
+RETARD
+----------------------------------------
+home:    https://www.unige.ch/~hairer/software.html
+license: BSD-2-Clause style, Copyright (c) 2004, UNIGE
+         https://www.unige.ch/~hairer/prog/licence.txt
+         (full text in licenses/retard-license.txt)
+adapted: stan/math/prim/functor/dde_retard.hpp (dde_rk45, dde_rk45_tol)
+version: September 30, 1995 (E. Hairer and G. Wanner)
+
+
 DEVELOPMENT LIBS
 ========================================
 
