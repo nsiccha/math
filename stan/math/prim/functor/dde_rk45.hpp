@@ -25,7 +25,7 @@ namespace math {
  *
  * at a set of times { t1, t2, t3, ... } with the non-stiff Runge-Kutta 45
  * method of Dormand and Prince, adapted from RETARD by E. Hairer and
- * G. Wanner (see <code>internal::dde_retard_integrate</code> and
+ * G. Wanner (see <code>internal::dde_retard_integrator</code> and
  * licenses/retard-license.txt).
  *
  * The step size never exceeds the smallest delay, and the integrator steps
@@ -159,9 +159,12 @@ dde_rk45_tol_impl(const char* function_name, const F& f, const T_y0& y0_arg,
         args_ref_tuple);
   };
 
-  internal::dde_retard_integrate(
-      function_name, coupled_system, coupled_system.initial_state(), t0, ts_vec,
-      tau_vec, relative_tolerance, absolute_tolerance, max_num_steps, observer);
+  internal::dde_retard_integrator<std::decay_t<decltype(coupled_system)>>
+      integrator(function_name, coupled_system, tau_vec, relative_tolerance,
+                 absolute_tolerance, max_num_steps);
+  const Eigen::VectorXd initial_state = coupled_system.initial_state();
+  integrator.start(t0, initial_state, initial_state);
+  integrator.advance_to(ts_vec.back(), ts_vec, observer);
 
   return y;
 }

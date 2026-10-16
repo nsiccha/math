@@ -14,7 +14,7 @@ namespace math {
 
 /**
  * The right hand side of a constant-delay DDE together with its forward
- * sensitivities, as integrated by <code>internal::dde_retard_integrate</code>.
+ * sensitivities, as integrated by <code>internal::dde_retard_integrator</code>.
  *
  * The primary template is specialized for arithmetic arguments (below, no
  * sensitivities) and for autodiff arguments (in rev).
@@ -46,6 +46,7 @@ struct coupled_dde_system_impl<true, F, T_y0, T_tau, Args...> {
   const Eigen::VectorXd& y0_;
   std::tuple<const Args&...> args_tuple_;
   const size_t N_;
+  const size_t D_;
   std::ostream* msgs_;
 
   /**
@@ -58,7 +59,12 @@ struct coupled_dde_system_impl<true, F, T_y0, T_tau, Args...> {
   coupled_dde_system_impl(const F& f, const Eigen::VectorXd& y0,
                           const T_tau& tau, std::ostream* msgs,
                           const Args&... args)
-      : f_(f), y0_(y0), args_tuple_(args...), N_(y0.size()), msgs_(msgs) {}
+      : f_(f),
+        y0_(y0),
+        args_tuple_(args...),
+        N_(y0.size()),
+        D_(tau.size()),
+        msgs_(msgs) {}
 
   /**
    * Evaluate the right hand side of the base system.
@@ -88,6 +94,17 @@ struct coupled_dde_system_impl<true, F, T_y0, T_tau, Args...> {
    * Returns the size of the coupled system.
    */
   size_t size() const { return N_; }
+
+  /**
+   * Returns the number of states of the base system.
+   */
+  size_t num_states() const { return N_; }
+
+  /**
+   * Returns the derivatives of the delays with respect to the sensitivity
+   * parameters: there are none.
+   */
+  Eigen::MatrixXd delay_sensitivities() const { return Eigen::MatrixXd(0, D_); }
 
   /**
    * Returns the number of leading components whose lagged derivatives the
