@@ -6,7 +6,10 @@
 #include <stan/math/prim/functor/apply_scalar_binary.hpp>
 #include <stan/math/prim/functor/apply_scalar_ternary.hpp>
 #include <stan/math/prim/functor/apply_vector_unary.hpp>
+#include <stan/math/prim/functor/coupled_dde_system.hpp>
 #include <stan/math/prim/functor/coupled_ode_system.hpp>
+#include <stan/math/prim/functor/dde_retard.hpp>
+#include <stan/math/prim/functor/dde_rk45.hpp>
 #include <stan/math/prim/functor/filter_map.hpp>
 #include <stan/math/prim/functor/finite_diff_gradient.hpp>
 #include <stan/math/prim/functor/finite_diff_gradient_auto.hpp>

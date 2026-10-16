@@ -26,3 +26,8 @@ licensed under the Apache 2.0 license. This dependency implies an
 additional restriction as compared to the new BSD license alone. The
 Apache 2.0 license is incompatible with GPL-2 licensed code if
 distributed as a unitary binary. You may refer to the Licensing page on the [Stan wiki](https://github.com/stan-dev/stan/wiki/Stan-Licensing).
+
+The delay differential equation solvers `dde_rk45` and `dde_rk45_tol` are
+adapted from RETARD by E. Hairer and G. Wanner, which is distributed under a
+BSD-2-Clause style license (Copyright (c) 2004, UNIGE); see
+[licenses/retard-license.txt](licenses/retard-license.txt).
