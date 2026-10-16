@@ -193,6 +193,25 @@ struct coupled_dde_system_impl<false, F, T_y0, T_tau, Args...> {
   }
 
   /**
+   * Returns the number of states of the base system.
+   */
+  size_t num_states() const { return N_; }
+
+  /**
+   * Returns the P x D matrix of the derivatives of the delays with respect to
+   * the sensitivity parameters: the identity in the rows of the delays if
+   * they are autodiff variables, otherwise zero.
+   */
+  Eigen::MatrixXd delay_sensitivities() const {
+    Eigen::MatrixXd dtau = Eigen::MatrixXd::Zero(
+        num_y0_vars_ + num_args_vars_ + num_tau_vars_, D_);
+    for (size_t j = 0; j < num_tau_vars_; ++j) {
+      dtau(num_y0_vars_ + num_args_vars_ + j, j) = 1;
+    }
+    return dtau;
+  }
+
+  /**
    * Returns the number of leading components whose lagged derivatives the
    * right hand side needs: the base states if the delays are autodiff
    * variables, otherwise none.
