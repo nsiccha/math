@@ -1,5 +1,6 @@
 #include <stan/math/rev.hpp>
 #include <test/unit/math/prim/functor/dde_test_functors.hpp>
+#include <test/unit/math/rev/util.hpp>
 #include <test/unit/util.hpp>
 #include <gtest/gtest.h>
 #include <cmath>
@@ -131,27 +132,27 @@ void expect_scalar_gradients_match_exact() {
   stan::math::recover_memory();
 }
 
-TEST(dde_rk45_rev, scalar_gradients_all_var) {
+TEST_F(AgradRev, dde_rk45_scalar_gradients_all_var) {
   expect_scalar_gradients_match_exact<var, var, var>();
 }
 
-TEST(dde_rk45_rev, scalar_gradients_y0_var) {
+TEST_F(AgradRev, dde_rk45_scalar_gradients_y0_var) {
   expect_scalar_gradients_match_exact<var, double, double>();
 }
 
-TEST(dde_rk45_rev, scalar_gradients_args_var) {
+TEST_F(AgradRev, dde_rk45_scalar_gradients_args_var) {
   expect_scalar_gradients_match_exact<double, var, double>();
 }
 
-TEST(dde_rk45_rev, scalar_gradients_tau_var) {
+TEST_F(AgradRev, dde_rk45_scalar_gradients_tau_var) {
   expect_scalar_gradients_match_exact<double, double, var>();
 }
 
-TEST(dde_rk45_rev, scalar_gradients_y0_tau_var) {
+TEST_F(AgradRev, dde_rk45_scalar_gradients_y0_tau_var) {
   expect_scalar_gradients_match_exact<var, double, var>();
 }
 
-TEST(dde_rk45_rev, scalar_gradients_args_tau_var) {
+TEST_F(AgradRev, dde_rk45_scalar_gradients_args_tau_var) {
   expect_scalar_gradients_match_exact<double, var, var>();
 }
 
@@ -159,7 +160,7 @@ TEST(dde_rk45_rev, scalar_gradients_args_tau_var) {
 // first stage derivative after the breakpoint t0 + tau to be recomputed with
 // the derivative of the solution after t0 (without it the error is about
 // 1e-4 here instead of about 4e-6)
-TEST(dde_rk45_rev, tau_gradient_at_default_tolerances) {
+TEST_F(AgradRev, dde_rk45_tau_gradient_at_default_tolerances) {
   const double t0 = 0.5;
   const double y0_val = 0.7;
   const double a_val = 1.3;
@@ -187,7 +188,7 @@ TEST(dde_rk45_rev, tau_gradient_at_default_tolerances) {
 
 // y' = -a1 y(t - tau1) - a2 y(t - tau2) with every input an autodiff
 // variable: the solver's gradient against finite differences of the solver
-TEST(dde_rk45_rev, two_delays_gradients_match_finite_differences) {
+TEST_F(AgradRev, dde_rk45_two_delays_gradients_match_finite_differences) {
   const double t0 = 0.0;
   const std::vector<double> ts = uniform_times(t0, 0.45, 12);
   // theta = (y0, a1, a2, tau1, tau2)
@@ -214,7 +215,7 @@ TEST(dde_rk45_rev, two_delays_gradients_match_finite_differences) {
 
 // the nonlinear two-state system with every input an autodiff variable
 // (the data argument c stays double)
-TEST(dde_rk45_rev, nonlinear_gradients_match_finite_differences) {
+TEST_F(AgradRev, dde_rk45_nonlinear_gradients_match_finite_differences) {
   const double t0 = 0.3;
   const std::vector<double> ts = uniform_times(t0, 0.6, 10);
   // theta = (y0_1, y0_2, k1, r, k2, k3, tau1, tau2)
@@ -236,7 +237,7 @@ TEST(dde_rk45_rev, nonlinear_gradients_match_finite_differences) {
 }
 
 // only the delays are autodiff variables
-TEST(dde_rk45_rev, nonlinear_tau_gradients_match_finite_differences) {
+TEST_F(AgradRev, dde_rk45_nonlinear_tau_gradients_match_finite_differences) {
   const double t0 = 0.0;
   const std::vector<double> ts = uniform_times(t0, 0.5, 10);
   const std::vector<double> theta{1.1, 0.65};
@@ -258,7 +259,7 @@ TEST(dde_rk45_rev, nonlinear_tau_gradients_match_finite_differences) {
 
 // a failure inside the right hand side propagates and leaves the autodiff
 // stack usable
-TEST(dde_rk45_rev, errors_propagate) {
+TEST_F(AgradRev, dde_rk45_errors_propagate) {
   Eigen::Matrix<var, Eigen::Dynamic, 1> y0(1);
   y0 << 1.0;
   Eigen::Matrix<var, Eigen::Dynamic, 1> tau(1);
@@ -288,7 +289,7 @@ TEST(dde_rk45_rev, errors_propagate) {
 #ifdef STAN_THREADS
 // several reverse mode solves running concurrently on their own autodiff
 // stacks give the same values and gradients as sequential ones
-TEST(dde_rk45_rev, concurrent_solves) {
+TEST_F(AgradRev, dde_rk45_concurrent_solves) {
   const int num_threads = 8;
   const std::vector<double> ts = uniform_times(0.0, 0.3, 15);
 
