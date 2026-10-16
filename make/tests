@@ -81,6 +81,15 @@ $(IDAS_TESTS) : $(SUNDIALS_TARGETS)
 
 ############################################################
 #
+# ARKODE tests
+##
+
+ARKODE_TESTS := $(subst .cpp,$(EXE),$(call findfiles,test,*ark*_test.cpp) $(call findfiles,test,*_erk*_test.cpp))
+$(ARKODE_TESTS) : $(LIBSUNDIALS)
+
+
+############################################################
+#
 # KINSOL tests
 ##
 
