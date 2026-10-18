@@ -3,6 +3,7 @@
 
 #include <stan/math/torsten/pmx_solve_bdf.hpp>
 #include <stan/math/torsten/pmx_solve_rk45.hpp>
+#include <stan/math/torsten/pmx_solve_dde_rk45.hpp>
 #include <stan/math/torsten/pmx_solve_adams.hpp>
 #include <stan/math/torsten/pmx_solve_linode.hpp>
 
