@@ -376,7 +376,10 @@ class dde_dense_history {
  * The second condition is needed even if u does not depend on theta: the
  * derivative of the dense output, which the sensitivity equations use for
  * dy(t - tau_j) / dtau_j, does not contain the delta function of a jump.
- * Several jumps at the same time are applied one after the other.
+ * Several jumps at the same time are applied one after the other. A caller
+ * that needs more (the state at an output time that depends on theta, or a
+ * jump that is not additive) reads the derivative at the current time with
+ * derivative(), which documents both conditions.
  *
  * @tparam System Type of the system. It must provide
  *   - <code>size_t size() const</code>, the number of components of z;
@@ -470,6 +473,47 @@ class dde_retard_integrator {
    * right limit (after the jumps and jump conditions at that time).
    */
   const Eigen::VectorXd& state() const { return y_; }
+
+  /**
+   * Right hand side F at time() and state(), with the lagged values that the
+   * next step of advance_to() uses: the derivative of z just after the
+   * current time. Where that derivative is discontinuous (after a jump or a
+   * change of the right hand side, or where a lagged argument reaches a
+   * discontinuity) this is its right limit. Before a jump or a change of the
+   * right hand side at the current time it is the derivative f^- that jump()
+   * and change_rhs() use.
+   *
+   * It is needed for the sensitivities of events whose time u depends on
+   * theta beyond those that jump() and change_rhs() handle, with f^- the
+   * first num_states() components of derivative() before the event:
+   *  - the state at an output time u has the total derivative
+   *      S_p + f^- * du / dtheta_p;
+   *  - a jump that is not additive, y^+ = g(y^-), has the jump condition
+   *      S_p^+ = g_y (S_p^- + f^- du / dtheta_p) + dg / dtheta_p
+   *              - f^+ du / dtheta_p,
+   *    which jump(dz, du_dtheta) applies with g(y^-) - y^- as the first
+   *    num_states() components of dz, and
+   *      (g_y - I) (S_p^- + f^- du / dtheta_p) + dg / dtheta_p
+   *    as its components of S_p (for example -(S_p^- + f^- du / dtheta_p) in
+   *    a component that is set to zero).
+   *
+   * The value is cached: advance_to(), and jump() and change_rhs() at a time
+   * that depends on theta, start from it, so calling derivative() before
+   * them costs no evaluation of the right hand side. After advance_to() it
+   * is usually the last stage of the last step, which costs none either.
+   *
+   * @return the derivative of z; the reference is valid until the next call
+   *   of start(), advance_to(), jump() or change_rhs()
+   * @throw std::domain_error if called before start()
+   */
+  const Eigen::VectorXd& derivative() {
+    if (!started_) {
+      throw_domain_error(function_name_, "", x_,
+                         "derivative called before start at time (", ")");
+    }
+    ensure_k1();
+    return k1_;
+  }
 
   /**
    * Start (or restart) the integration at t0, forgetting the history.

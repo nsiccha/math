@@ -38,6 +38,26 @@ std::vector<Eigen::VectorXd> collect(dde_retard_integrator<scalar_system>& it,
   return out;
 }
 
+// A system that counts the evaluations of its right hand side.
+template <typename System>
+struct counting_system {
+  const System& system;
+  size_t count = 0;
+
+  size_t size() const { return system.size(); }
+  size_t num_states() const { return system.num_states(); }
+  size_t num_lag_derivatives() const { return system.num_lag_derivatives(); }
+  Eigen::MatrixXd delay_sensitivities() const {
+    return system.delay_sensitivities();
+  }
+  void operator()(double t, const Eigen::VectorXd& z,
+                  const Eigen::MatrixXd& z_lag,
+                  const Eigen::MatrixXd& z_lag_deriv, Eigen::VectorXd& dz_dt) {
+    ++count;
+    system(t, z, z_lag, z_lag_deriv, dz_dt);
+  }
+};
+
 }  // namespace
 
 // The breakpoints of a source u are u + sum_j k_j tau_j, 1 <= sum_j k_j <= 5,
@@ -208,6 +228,118 @@ TEST(dde_retard_integrator_prim, restart_forgets_the_history) {
   }
 }
 
+// derivative() is y' = -a y(t - tau) at the current time, for the unit jump
+// at t = 0 against the method of steps. At t = tau it is the right limit -a
+// (the left limit is 0).
+TEST(dde_retard_integrator_prim, derivative_matches_exact_solution) {
+  const double a = 0.7;
+  const double tau = 0.8;
+  scalar_lag_rhs f;
+  const Eigen::VectorXd y0 = vec({0.0});
+  const Eigen::VectorXd tau_vec = vec({tau});
+  scalar_system system(f, y0, tau_vec, nullptr, a);
+  dde_retard_integrator<scalar_system> it("derivative", system, {tau}, 1e-10,
+                                          1e-10, 100000);
+  it.start(0.0, y0, y0);
+  EXPECT_EQ(it.derivative()(0), 0.0);
+  it.jump(vec({1.0}), Eigen::VectorXd());
+  EXPECT_EQ(it.derivative()(0), 0.0);
+  it.advance_to(tau);
+  EXPECT_NEAR(it.derivative()(0), -a, 1e-12);
+  for (double t : {1.0, 1.2, 1.6, 2.0, 2.4, 3.0, 4.5}) {
+    it.advance_to(t);
+    double y, dy_da, dy_dtau;
+    unit_jump_lag_exact(t - tau, a, tau, y, dy_da, dy_dtau);
+    EXPECT_NEAR(it.derivative()(0), -a * y, 1e-9) << t;
+  }
+}
+
+// After a jump and after a change of the right hand side, derivative() is the
+// right limit: x1' = -k x1 + rate with the new x1 and the new rate, while
+// x2', which depends on neither, is unchanged.
+TEST(dde_retard_integrator_prim, derivative_is_the_right_limit) {
+  double rate = 0;
+  dosing_rhs f{&rate};
+  const Eigen::VectorXd y0 = vec({0.0, 0.0});
+  const std::vector<double> tau{1.3, 2.1};
+  const Eigen::VectorXd tau_vec = vec({1.3, 2.1});
+  const double k = 0.5;
+  const std::vector<double> theta{k, 0.9};
+  dosing_system system(f, y0, tau_vec, nullptr, theta);
+  dde_retard_integrator<dosing_system> it("right_limit", system, tau, 1e-10,
+                                          1e-10, 100000);
+  it.start(0.0, y0, y0);
+  it.jump(vec({2.0, 0.0}), Eigen::VectorXd());
+  it.advance_to(1.5);
+  const Eigen::VectorXd before_jump = it.derivative();
+  EXPECT_DOUBLE_EQ(before_jump(0), -k * it.state()(0));
+  it.jump(vec({1.0, 0.0}), Eigen::VectorXd());
+  const Eigen::VectorXd after_jump = it.derivative();
+  EXPECT_DOUBLE_EQ(after_jump(0), -k * it.state()(0));
+  EXPECT_DOUBLE_EQ(after_jump(0) - before_jump(0), -k * 1.0);
+  EXPECT_EQ(after_jump(1), before_jump(1));
+  it.change_rhs(Eigen::VectorXd(), [&] { rate = 2.0; });
+  const Eigen::VectorXd after_change = it.derivative();
+  EXPECT_DOUBLE_EQ(after_change(0), -k * it.state()(0) + 2.0);
+  EXPECT_EQ(after_change(1), after_jump(1));
+}
+
+// derivative() is the first stage of the next step: calling it (repeatedly)
+// after start(), after events and after advance_to() changes neither the
+// solution nor the number of evaluations of the right hand side.
+TEST(dde_retard_integrator_prim, derivative_costs_no_evaluation) {
+  double rate = 0;
+  dosing_rhs f{&rate};
+  const Eigen::VectorXd y0 = vec({0.0, 0.0});
+  const std::vector<double> tau{1.3, 2.1};
+  const Eigen::VectorXd tau_vec = vec({1.3, 2.1});
+  const std::vector<double> theta{0.5, 0.9};
+  dosing_system system(f, y0, tau_vec, nullptr, theta);
+  const std::vector<double> ts{2.6, 3.4, 4.0, 6.0};
+
+  auto run = [&](bool read, size_t& count) {
+    counting_system<dosing_system> counted{system};
+    dde_retard_integrator<counting_system<dosing_system>> it(
+        "costs", counted, tau, 1e-10, 1e-10, 100000);
+    auto touch = [&] {
+      if (read) {
+        it.derivative();
+        const size_t evaluations = counted.count;
+        it.derivative();
+        EXPECT_EQ(counted.count, evaluations);
+      }
+    };
+    rate = 0;
+    it.start(0.0, y0, y0);
+    touch();
+    it.advance_to(0.4);
+    touch();
+    it.advance_to(1.3);
+    it.jump(vec({2.0, 0.0}), Eigen::VectorXd());
+    touch();
+    it.advance_to(1.5);
+    it.change_rhs(Eigen::VectorXd(), [&] { rate = 2.0; });
+    touch();
+    std::vector<Eigen::VectorXd> out;
+    it.advance_to(ts.back(), ts,
+                  [&](size_t, const Eigen::VectorXd& z) { out.push_back(z); });
+    touch();
+    count = counted.count;
+    return out;
+  };
+  size_t count_plain = 0;
+  size_t count_read = 0;
+  const auto plain = run(false, count_plain);
+  const auto read = run(true, count_read);
+  // after the end, derivative() is the last stage of the last step
+  EXPECT_EQ(count_read, count_plain);
+  ASSERT_EQ(plain.size(), read.size());
+  for (size_t i = 0; i < plain.size(); ++i) {
+    EXPECT_EQ(plain[i](0), read[i](0)) << ts[i];
+    EXPECT_EQ(plain[i](1), read[i](1)) << ts[i];
+  }
+}
+
 TEST(dde_retard_integrator_prim, errors) {
   scalar_lag_rhs f;
   const Eigen::VectorXd y0 = vec({1.0});
@@ -217,6 +349,8 @@ TEST(dde_retard_integrator_prim, errors) {
                                           100000);
   EXPECT_THROW_MSG(it.advance_to(1.0), std::domain_error,
                    "advance_to called before start");
+  EXPECT_THROW_MSG(it.derivative(), std::domain_error,
+                   "derivative called before start");
   EXPECT_THROW_MSG(it.start(0.0, vec({1.0, 2.0}), y0), std::invalid_argument,
                    "state");
   EXPECT_THROW_MSG(it.start(0.0, y0, vec({1.0, 2.0})), std::invalid_argument,

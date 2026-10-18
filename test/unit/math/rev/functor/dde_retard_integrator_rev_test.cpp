@@ -60,6 +60,111 @@ std::vector<Eigen::VectorXd> dosing_values(const dosing_parameters& p,
   return run_dosing_schedule(system, rate, tau, p.schedule(), ts, 1e-12);
 }
 
+// Parameters of the reset tests: theta = (k, k2, reset_time, dose,
+// observation_time), then the delays tau_1, tau_2.
+struct reset_parameters {
+  std::vector<double> values{0.5, 0.9, 1.0, 2.0, 2.7, 1.3, 2.1};
+
+  std::vector<double> theta() const {
+    return {values.begin(), values.begin() + 5};
+  }
+  std::vector<double> tau() const { return {values[5], values[6]}; }
+};
+
+/**
+ * dosing_rhs without input, a bolus of size dose into x1 at t = 0.2, x1 set
+ * to zero at reset_time (NONMEM's EVID 2 with a negative compartment), and an
+ * observation at observation_time. Returns the state at the output times ts
+ * (none of them an event time u or its first propagation u + tau_j, where
+ * the sensitivities jump), followed by the state at the observation.
+ *
+ * With sensitivities, the reset is the jump y^+ = g(y^-) with g_y - I = -1 in
+ * x1 at a time that depends on theta, so its jump of S_p in x1 is
+ * -(S_p^- + f^- du / dtheta_p); and the sensitivities of the observation are
+ * the total derivatives S_p + f du / dtheta_p. Both read f from derivative().
+ */
+template <typename System>
+std::vector<Eigen::VectorXd> run_reset(System& system, double& rate,
+                                       const reset_parameters& p,
+                                       const std::vector<double>& ts,
+                                       double tolerance) {
+  const Eigen::Index N = 2;
+  const Eigen::Index n = system.size();
+  const Eigen::Index P = n / N - 1;
+  dde_retard_integrator<System> it("run_reset", system, p.tau(), tolerance,
+                                   tolerance, 1000000);
+  const Eigen::VectorXd zero = Eigen::VectorXd::Zero(n);
+  rate = 0;
+  it.start(0.0, zero, zero);
+  std::vector<Eigen::VectorXd> out;
+  size_t next = 0;
+  auto advance = [&](double t1) {
+    std::vector<double> ts_part;
+    while (next < ts.size() && ts[next] <= t1) {
+      ts_part.push_back(ts[next++]);
+    }
+    it.advance_to(t1, ts_part,
+                  [&](size_t, const Eigen::VectorXd& z) { out.push_back(z); });
+  };
+  // d(time) / dtheta for a time equal to theta[q]
+  auto time_sensitivity = [&](Eigen::Index q) {
+    if (P == 0) {
+      return Eigen::VectorXd();
+    }
+    Eigen::VectorXd dt_dtheta = Eigen::VectorXd::Zero(P);
+    dt_dtheta(q) = 1;
+    return dt_dtheta;
+  };
+
+  advance(0.2);
+  Eigen::VectorXd dz = zero;
+  dz(0) = p.values[3];
+  if (P > 0) {
+    dz(N * (1 + 3)) = 1;
+  }
+  it.jump(dz, Eigen::VectorXd());
+
+  advance(p.values[2]);
+  const Eigen::VectorXd du_dtheta = time_sensitivity(2);
+  dz = zero;
+  dz(0) = -it.state()(0);
+  if (P > 0) {
+    const double f_minus = it.derivative()(0);
+    for (Eigen::Index q = 0; q < P; ++q) {
+      dz(N * (1 + q)) = -(it.state()(N * (1 + q)) + f_minus * du_dtheta(q));
+    }
+  }
+  it.jump(dz, du_dtheta);
+
+  advance(p.values[4]);
+  Eigen::VectorXd observation = it.state();
+  if (P > 0) {
+    const Eigen::VectorXd dt_dtheta = time_sensitivity(4);
+    const Eigen::VectorXd f = it.derivative().head(N);
+    for (Eigen::Index q = 0; q < P; ++q) {
+      observation.segment(N * (1 + q), N) += dt_dtheta(q) * f;
+    }
+  }
+
+  advance(ts.back());
+  out.push_back(observation);
+  return out;
+}
+
+// The reset schedule without sensitivities.
+std::vector<Eigen::VectorXd> reset_values(const reset_parameters& p,
+                                          const std::vector<double>& ts) {
+  double rate = 0;
+  dosing_rhs f{&rate};
+  const Eigen::VectorXd y0 = vec({0.0, 0.0});
+  const std::vector<double> theta = p.theta();
+  const std::vector<double> tau = p.tau();
+  const Eigen::VectorXd tau_vec = vec({tau[0], tau[1]});
+  coupled_dde_system<dosing_rhs, double, Eigen::VectorXd, std::vector<double>>
+      system(f, y0, tau_vec, nullptr, theta);
+  return run_reset(system, rate, p, ts, 1e-12);
+}
+
 }  // namespace
 
 // y' = -a y(t - tau) with history 0 and a unit jump at t = 0: on [tau, 2 tau]
@@ -189,5 +294,56 @@ TEST_F(AgradRev, dde_retard_integrator_simultaneous_jumps) {
       EXPECT_NEAR(one[i](k), two[i](k), 1e-9 * (1 + std::fabs(one[i](k))))
           << ts[i] << " " << k;
     }
+  }
+}
+
+// The two conditions that need derivative(): a reset of x1 to zero at a time
+// that depends on theta, and an observation at a time that depends on theta.
+// The sensitivities with respect to all parameters, the reset and observation
+// times among them, against central finite differences.
+TEST_F(AgradRev, dde_retard_integrator_reset_and_observation_time) {
+  const std::vector<double> ts{0.5, 1.6, 2.0, 2.5, 3.5, 5.0, 7.0};
+  const reset_parameters p;
+  const size_t P = p.values.size();
+
+  double rate = 0;
+  dosing_rhs f{&rate};
+  const Eigen::VectorXd y0 = vec({0.0, 0.0});
+  const std::vector<double> theta_d = p.theta();
+  const std::vector<var> theta(theta_d.begin(), theta_d.end());
+  const std::vector<double> tau_d = p.tau();
+  vector_v tau(2);
+  tau << tau_d[0], tau_d[1];
+  using system_t
+      = coupled_dde_system<dosing_rhs, double, vector_v, std::vector<var>>;
+  system_t system(f, y0, tau, nullptr, theta);
+  ASSERT_EQ(system.size(), 2 * (1 + P));
+  const auto out = run_reset(system, rate, p, ts, 1e-12);
+  const auto values = reset_values(p, ts);
+  ASSERT_EQ(out.size(), ts.size() + 1);
+  ASSERT_EQ(values.size(), ts.size() + 1);
+  // x1 stays zero after the reset, and so does its sensitivity
+  EXPECT_EQ(values[2](0), 0.0);
+  EXPECT_NEAR(out[2](2 + 2 * 2), 0.0, 1e-12);
+
+  for (size_t q = 0; q < P; ++q) {
+    const double eps = 1e-6;
+    reset_parameters plus = p;
+    reset_parameters minus = p;
+    plus.values[q] += eps;
+    minus.values[q] -= eps;
+    const auto y_plus = reset_values(plus, ts);
+    const auto y_minus = reset_values(minus, ts);
+    for (size_t i = 0; i < out.size(); ++i) {
+      for (int n = 0; n < 2; ++n) {
+        const double fd = (y_plus[i](n) - y_minus[i](n)) / (2 * eps);
+        EXPECT_NEAR(out[i](2 + 2 * q + n), fd, 1e-5)
+            << "parameter " << q << ", output " << i << ", state " << n;
+      }
+    }
+  }
+  for (size_t i = 0; i < out.size(); ++i) {
+    EXPECT_NEAR(out[i](0), values[i](0), 1e-12);
+    EXPECT_NEAR(out[i](1), values[i](1), 1e-12);
   }
 }
