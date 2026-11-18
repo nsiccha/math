@@ -5,6 +5,7 @@
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/rev/functor/idas_integrator.hpp>
 #include <stan/math/rev/functor/dae_system.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
 #include <ostream>
 #include <vector>
 
@@ -173,7 +174,52 @@ dae(const F& f, const T_yy& yy0, const T_yp& yp0, double t0,
                       args...);
 }
 
+/**
+ * Solve a DAE given its residual and a user-supplied Jacobian of the
+ * residual, using the given tolerances; see the <code>dae_tol</code>
+ * overload without a Jacobian.
+ *
+ * <p>The Newton iteration (dF/dyy + cj dF/dyp) and the forward
+ * sensitivities use the user Jacobian, evaluated in doubles, instead of
+ * finite differences (Newton) and autodiff (sensitivities).
+ *
+ * @param jac Jacobian of the residual. Takes the same arguments as f and
+ *   returns an N x (2N + P) matrix: the derivatives of the residual with
+ *   respect to yy, then yp, then every real scalar of the variadic
+ *   arguments, in the order of <code>internal::ode_jacobian_pair</code>.
+ * (other arguments as in the <code>dae_tol</code> overload without a
+ * Jacobian)
+ */
+template <typename F, typename FJac, typename T_yy, typename T_yp,
+          typename... T_Args,
+          require_all_eigen_col_vector_t<T_yy, T_yp>* = nullptr>
+inline std::vector<
+    Eigen::Matrix<stan::return_type_t<T_yy, T_yp, T_Args...>, -1, 1>>
+dae_tol(const F& f, const FJac& jac, const T_yy& yy0, const T_yp& yp0,
+        double t0, const std::vector<double>& ts, double rtol, double atol,
+        int64_t max_num_steps, std::ostream* msgs, const T_Args&... args) {
+  const internal::ode_jacobian_pair<F, FJac> f_jac(f, jac);
+  return dae_tol_impl("dae_tol", f_jac, yy0, yp0, t0, ts, rtol, atol,
+                      max_num_steps, msgs, args...);
+}
+
+/**
+ * Solve a DAE given its residual and a user-supplied Jacobian of the
+ * residual, using the default tolerances of <code>dae</code>; see the
+ * <code>dae_tol</code> overload taking a Jacobian.
+ */
+template <typename F, typename FJac, typename T_yy, typename T_yp,
+          typename... T_Args,
+          require_all_eigen_col_vector_t<T_yy, T_yp>* = nullptr>
+inline std::vector<
+    Eigen::Matrix<stan::return_type_t<T_yy, T_yp, T_Args...>, -1, 1>>
+dae(const F& f, const FJac& jac, const T_yy& yy0, const T_yp& yp0, double t0,
+    const std::vector<double>& ts, std::ostream* msgs, const T_Args&... args) {
+  const internal::ode_jacobian_pair<F, FJac> f_jac(f, jac);
+  return dae_tol_impl("dae", f_jac, yy0, yp0, t0, ts, 1.e-10, 1.e-10, 1e8, msgs,
+                      args...);
+}
+
 }  // namespace math
 }  // namespace stan
-
 #endif
