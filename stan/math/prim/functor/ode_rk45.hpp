@@ -4,6 +4,7 @@
 #include <stan/math/prim/meta.hpp>
 #include <stan/math/prim/functor/apply.hpp>
 #include <stan/math/prim/functor/coupled_ode_system.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
 #include <stan/math/prim/functor/ode_store_sensitivities.hpp>
 #include <stan/math/prim/fun/Eigen.hpp>
 #include <boost/numeric/odeint.hpp>
@@ -252,6 +253,63 @@ ode_rk45(const F& f, const T_y0& y0, T_t0 t0, const std::vector<T_ts>& ts,
 
   return ode_rk45_tol_impl("ode_rk45", f, y0, t0, ts, relative_tolerance,
                            absolute_tolerance, max_num_steps, msgs, args...);
+}
+
+/**
+ * Solve an ODE given its right-hand side and a user-supplied Jacobian of
+ * the right-hand side with the Dormand-Prince algorithm, using the given
+ * tolerances; see <code>ode_rk45_tol</code>.
+ *
+ * <p>Forward sensitivities are computed from the user Jacobian, evaluated
+ * in doubles, instead of by nested autodiff of the right-hand side.
+ *
+ * @tparam F Type of ODE right hand side
+ * @tparam FJac Type of the Jacobian of the ODE right hand side
+ * @param f Right hand side of the ODE
+ * @param jac Jacobian of the right hand side. Takes the same arguments as
+ *   f and returns an N x (N + P) matrix: the derivatives of f with
+ *   respect to the state, followed by those with respect to every scalar
+ *   of the variadic arguments, in order (Eigen types column-major).
+ *   Columns belonging to data arguments are not read.
+ * (other arguments as in <code>ode_rk45_tol</code>)
+ */
+template <typename F, typename FJac, typename T_y0, typename T_t0,
+          typename T_ts, typename... Args,
+          require_eigen_vector_t<T_y0>* = nullptr>
+inline std::vector<Eigen::Matrix<stan::return_type_t<T_y0, T_t0, T_ts, Args...>,
+                                 Eigen::Dynamic, 1>>
+ode_rk45_jac_tol(const F& f, const FJac& jac, const T_y0& y0_arg, T_t0 t0,
+                 const std::vector<T_ts>& ts, double relative_tolerance,
+                 double absolute_tolerance,
+                 long int max_num_steps,  // NOLINT(runtime/int)
+                 std::ostream* msgs, const Args&... args) {
+  const internal::ode_jacobian_pair<F, FJac> f_jac(f, jac);
+  return ode_rk45_tol_impl("ode_rk45_jac_tol", f_jac, y0_arg, t0, ts,
+                           relative_tolerance, absolute_tolerance,
+                           max_num_steps, msgs, args...);
+}
+
+/**
+ * Solve an ODE given its right-hand side and a user-supplied Jacobian of
+ * the right-hand side with the Dormand-Prince algorithm, using the
+ * default tolerances of <code>ode_rk45</code>; see
+ * <code>ode_rk45_jac_tol</code>.
+ */
+template <typename F, typename FJac, typename T_y0, typename T_t0,
+          typename T_ts, typename... Args,
+          require_eigen_vector_t<T_y0>* = nullptr>
+inline std::vector<Eigen::Matrix<stan::return_type_t<T_y0, T_t0, T_ts, Args...>,
+                                 Eigen::Dynamic, 1>>
+ode_rk45_jac(const F& f, const FJac& jac, const T_y0& y0, T_t0 t0,
+             const std::vector<T_ts>& ts, std::ostream* msgs,
+             const Args&... args) {
+  double relative_tolerance = 1e-6;
+  double absolute_tolerance = 1e-6;
+  long int max_num_steps = 1e6;  // NOLINT(runtime/int)
+  const internal::ode_jacobian_pair<F, FJac> f_jac(f, jac);
+  return ode_rk45_tol_impl("ode_rk45_jac", f_jac, y0, t0, ts,
+                           relative_tolerance, absolute_tolerance,
+                           max_num_steps, msgs, args...);
 }
 
 }  // namespace math

@@ -120,6 +120,18 @@ class cvodes_integrator {
    * given time-point t and state y.
    */
   inline void jacobian_states(double t, const double y[], SUNMatrix J) const {
+    if constexpr (internal::is_ode_jacobian_pair<F>::value) {
+      const Eigen::VectorXd y_vec = Eigen::Map<const Eigen::VectorXd>(y, N_);
+      Eigen::MatrixXd jac = math::apply(
+          [&](auto&&... args) { return f_.jacobian(t, y_vec, msgs_, args...); },
+          value_of_args_tuple_);
+      check_size_match("cvodes_integrator", "rows of the Jacobian", jac.rows(),
+                       "states", N_);
+      check_greater_or_equal("cvodes_integrator", "columns of the Jacobian",
+                             jac.cols(), N_);
+      Eigen::Map<Eigen::MatrixXd>(SM_DATA_D(J), N_, N_) = jac.leftCols(N_);
+      return;
+    }
     Eigen::VectorXd fy;
     Eigen::MatrixXd Jfy;
 
@@ -146,6 +158,24 @@ class cvodes_integrator {
    */
   inline void rhs_sens(double t, const double y[], N_Vector* yS,
                        N_Vector* ySdot) {
+    if constexpr (internal::is_ode_jacobian_pair<F>::value
+                  && !std::is_arithmetic<
+                      return_type_t<T_y0_t0, T_Args...>>::value) {
+      // The sensitivity right-hand side needs only the user Jacobian; copy
+      // the sensitivities into one contiguous block for the matrix product
+      const size_t num_vars = num_y0_vars_ + num_args_vars_;
+      Eigen::MatrixXd S(N_, num_vars);
+      for (std::size_t s = 0; s < num_vars; s++) {
+        S.col(s) = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yS[s]), N_);
+      }
+      Eigen::MatrixXd dS_dt(N_, num_vars);
+      coupled_ode_.sensitivity_rhs(
+          t, Eigen::Map<const Eigen::VectorXd>(y, N_), S.data(), dS_dt.data());
+      for (std::size_t s = 0; s < num_vars; s++) {
+        Eigen::Map<Eigen::VectorXd>(NV_DATA_S(ySdot[s]), N_) = dS_dt.col(s);
+      }
+      return;
+    }
     std::vector<double> z(coupled_state_.size());
     std::vector<double> dz_dt;
     std::copy(y, y + N_, z.data());
