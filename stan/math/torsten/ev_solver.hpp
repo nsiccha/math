@@ -219,8 +219,7 @@ namespace torsten{
         else
           init = torsten::mpi::precomputed_gradients(sol_d.segment(0, nsys), v_i);  // steady state with reset (ss = 1)
       } else if (events.time(i) > tprev) {
-        // auto curr_rates = stan::math::value_of(em.fractioned_rates(i));
-        auto curr_rates = em.fractioned_rates(i);
+        const auto& curr_rates = em.rates(i);
           T_model pkmodel {model_factory<T_model, EM, scalar_pars_type...>::model(em, i,
                                                                                   par_index_seq<ode_data_type...>{},
                                                                                   scalar_pars...)};

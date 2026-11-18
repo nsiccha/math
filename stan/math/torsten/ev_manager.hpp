@@ -30,15 +30,17 @@ namespace torsten {
     using param_t = NonEventParameters<T0, T4, theta_container, std::tuple<tuple_pars_t...>, Ts...>;
     using ER = NONMENEventsRecord<T0, T1, T2, T3>;
     using T_scalar = typename stan::return_type_t<typename ER::T_scalar, T4, tuple_pars_t..., Ts...>;
-    using T_time   = typename stan::return_type_t<typename ER::T_time, typename param_t::lag_t>;
-    using T_rate   = typename stan::return_type_t<typename ER::T_rate, typename param_t::biovar_t>;
+    // bioavailability sets infusion durations, so it enters event times, not rates
+    using T_time   = typename stan::return_type_t<typename ER::T_time, typename param_t::lag_t, typename param_t::biovar_t>;
+    using T_rate   = typename ER::T_rate;
     using T_amt    = typename stan::return_type_t<typename ER::T_amt, typename param_t::biovar_t>;
     using T_par    = T4;
     using T_par_rate = T2;
     using T_par_ii   = T3;
+    using event_history_t = EventHistory<T0, T1, T2, T3, typename param_t::lag_t, typename param_t::biovar_t>;
 
     param_t params;             /**< non-event parameters */
-    EventHistory<T0, T1, T2, T3, typename param_t::lag_t> event_his;
+    event_history_t event_his;
 
     int nKeep;                  /**< number of original events */
     int ncmt;                   /**< number of compartments of the PMX model */
@@ -88,14 +90,7 @@ namespace torsten {
       params(id, rec, theta, non_event_params...),
       event_his(rec.ncmt, rec.begin_[id], rec.len_[id], rec.time_, rec.amt_, rec.rate_, rec.ii_, rec.evid_, rec.cmt_, rec.addl_, rec.ss_)
     {
-      ncmt = rec.ncmt;
-
-      attach_event_parameters();
-      insert_lag_dose();
-      event_his.generate_rates(ncmt);
-      attach_event_parameters();
-
-      nKeep = event_his.num_event_times;
+      generate_events(rec.ncmt);
     }
 
     template<typename... Tss>
@@ -108,11 +103,25 @@ namespace torsten {
       params(id, rec, ibegin_theta, isize_theta, ibegin_biovar, isize_biovar, ibegin_tlag, isize_tlag, theta, non_event_params...),
       event_his(rec.ncmt, rec.begin_[id], rec.len_[id], rec.time_, rec.amt_, rec.rate_, rec.ii_, rec.evid_, rec.cmt_, rec.addl_, rec.ss_)
     {
-      ncmt = rec.ncmt;
+      generate_events(rec.ncmt);
+    }
+
+    /**
+     * Add the events the record implies: lagged doses, then the end
+     * of each infusion. An infusion's end depends on its dose's
+     * bioavailability, so the lagged doses get their parameters first.
+     *
+     * @param ncmt0 nb. of compartments
+     */
+    void generate_events(int ncmt0) {
+      ncmt = ncmt0;
 
       attach_event_parameters();
       insert_lag_dose();
-      event_his.generate_rates(ncmt);
+      attach_event_parameters();
+      event_his.generate_rates(ncmt, [this](int i) {
+          return params.bioavailability(i, event_his.cmt(i) - 1);
+        });
       attach_event_parameters();
 
       nKeep = event_his.num_event_times;
@@ -147,7 +156,7 @@ namespace torsten {
      * 
      * @return @c EventHistory
      */
-    const EventHistory<T0, T1, T2, T3, typename param_t::lag_t>& events() const {
+    const event_history_t& events() const {
       return event_his;
     }
 
@@ -222,21 +231,16 @@ namespace torsten {
       return params.template get_model_array_1d_param<Is>(i);
     }
 
-    /** 
-     * Get dosing rate adjusted with bioavailability for a subject
-     * 
-     * @param i subject id
-     * 
-     * @return dosing rate
+    /**
+     * Get the infusion rates in effect up to event @c i. They are
+     * not scaled by bioavailability, which sets infusion durations.
+     *
+     * @param i event index
+     *
+     * @return infusion rate per compartment
      */
-    inline std::vector<T_rate> fractioned_rates(int i) const {
-      const int n = event_his.rates[0].second.size();
-      const std::vector<T2>& r = event_his.rates[event_his.rate_index[i]].second;
-      std::vector<T_rate> res(r.size());
-      for (size_t j = 0; j < r.size(); ++j) {
-        res[j] = r[j] * params.bioavailability(i, j);
-      }
-      return res;
+    inline const std::vector<T_rate>& rates(int i) const {
+      return event_his.rates[event_his.rate_index[i]].second;
     }
 
     /** 
@@ -303,7 +307,7 @@ namespace torsten {
       if (event_his.is_bolus_dosing(i) || event_his.is_ss_dosing(i)) {
         amt(event_his.cmt(i) - 1) = fractioned_amt(i);
       }
-      std::vector<T_rate> rate(fractioned_rates(i));
+      const std::vector<T_rate>& rate(rates(i));
       return {id, t0, t1, event_his.ii(i),
               amt, rate, event_his.rate(i), event_his.cmt(i)};
     }

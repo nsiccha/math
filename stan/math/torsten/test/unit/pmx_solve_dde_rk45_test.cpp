@@ -607,15 +607,22 @@ void expect_same_solution(Eigen::Matrix<var, -1, -1>& a, int col_a,
  * A steady-state dose (SS = 1, II > 0) restarts from the steady state of its
  * regimen: the solution after it, and its gradients, agree with a long
  * transient run of the same regimen from the history. For an oral bolus
- * regimen, and for an IV infusion regimen.
+ * regimen, and for an IV infusion regimen with F = 1 and with F != 1: an
+ * infusion keeps its RATE and lasts F * AMT / RATE in the burn-in as in the
+ * transient run.
  */
 TEST(pmx_solve_dde_rk45, periodic_steady_state_matches_long_run) {
   struct regimen {
     int cmt;
-    double amt, rate, ii;
+    double amt, rate, ii, f;
   };
-  for (const regimen& r : {regimen{1, 100, 0, 24}, regimen{2, 60, 20, 12}}) {
-    const std::string name = r.rate > 0 ? "infusion" : "bolus";
+  for (const regimen& r : {regimen{1, 100, 0, 24, 1}, regimen{2, 60, 20, 12, 1},
+                           regimen{2, 60, 20, 12, 0.7}}) {
+    const std::string name = (r.rate > 0 ? "infusion" : "bolus")
+                             + std::string(", F = ") + std::to_string(r.f);
+    std::vector<double> biovar(3, 1.0);
+    biovar[r.cmt - 1] = r.f;
+    const std::vector<double> tlag(3, 0.0);
     const std::vector<double> ts{201.3, 210.7, 230.2, 247.9, 260.4};
     schedule ss;
     ss.add(200, 1, r.cmt, r.amt, r.rate, r.ii, 6, 1);
@@ -632,8 +639,8 @@ TEST(pmx_solve_dde_rk45, periodic_steady_state_matches_long_run) {
       return torsten::pmx_solve_dde_rk45(
           delayed_indirect_response_rhs(), 3, s.time, s.amt, s.rate, s.ii,
           s.evid, s.cmt, s.addl, s.ss, theta, to_eigen(tau),
-          to_eigen(y_hist_ref), 1e-10, 1e-10, 10000000, 1e-11, 1e-11, 1000,
-          nullptr);
+          to_eigen(y_hist_ref), biovar, tlag, 1e-10, 1e-10, 10000000, 1e-11,
+          1e-11, 1000, nullptr);
     };
     Eigen::Matrix<var, -1, -1> y_ss = solve(ss);
     Eigen::Matrix<var, -1, -1> y_transient = solve(transient);
