@@ -139,7 +139,10 @@ TYPED_TEST_P(test_twocpt, multiple_infusion) {
 
   this -> test_finite_diff_amt(1.e-3, 1.e-6);
   this -> test_finite_diff_rate(1.e-3, 1.e-6);
-  this -> test_finite_diff_biovar(1.e-3, 1.e-6);
+  // F sets the infusion duration F * AMT / RATE, so the solution curves
+  // in F: a smaller step keeps the central difference's O(h^2) error
+  // below the tolerance
+  this -> test_finite_diff_biovar(1.e-4, 1.e-6);
 }
 
 TYPED_TEST_P(test_twocpt, multiple_infusion_ss) {
@@ -153,7 +156,10 @@ TYPED_TEST_P(test_twocpt, multiple_infusion_ss) {
 
   this -> test_finite_diff_amt(1.e-3, 1.e-6);
   this -> test_finite_diff_rate(1.e-3, 1.e-6);
-  this -> test_finite_diff_biovar(1.e-3, 5.e-4);
+  // F sets the infusion duration F * AMT / RATE, so the solution curves
+  // in F: a smaller step keeps the central difference's O(h^2) error
+  // below the tolerance
+  this -> test_finite_diff_biovar(1.e-4, 5.e-4);
   this -> test_finite_diff_ii(1.e-3, 5.e-4);
 }
 

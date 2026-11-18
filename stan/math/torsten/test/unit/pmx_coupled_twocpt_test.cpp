@@ -167,6 +167,10 @@ TEST_F(TorstenCoupledTwoCptTest, truncated_infusion) {
                               parameters, biovar, tlag,
                               rel_tol, abs_tol, max_num_steps,
                               2e-5, 1e-6, 1e-3, 1e-5);
+  // F sets the infusion duration F * AMT / RATE: at F = 1 the infusion
+  // ends at the observation t = 1, where the solution has a kink in F, so
+  // the derivative in F is taken at F = 0.9 (end at t = 0.9)
+  biovar[0] = std::vector<double>(nOde, 0.9);
   TORSTEN_ODE_GRAD_BIOVAR_TEST(pmx_solve_twocpt_rk45, f, nPD,
                                time, amt, rate, ii, evid, cmt, addl, ss,
                                parameters, biovar, tlag,
