@@ -21,6 +21,7 @@
 #include <stan/math/rev/functor/ode_bdf.hpp>
 #include <stan/math/rev/functor/ode_adjoint.hpp>
 #include <stan/math/rev/functor/ode_store_sensitivities.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
 #include <stan/math/rev/functor/jacobian.hpp>
 #include <stan/math/rev/functor/kinsol_data.hpp>
 #include <stan/math/rev/functor/kinsol_solve.hpp>

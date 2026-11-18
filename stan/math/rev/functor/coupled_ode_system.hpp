@@ -2,6 +2,8 @@
 #define STAN_MATH_REV_FUNCTOR_COUPLED_ODE_SYSTEM_HPP
 
 #include <stan/math/prim/functor/coupled_ode_system.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
 #include <stan/math/rev/functor/cvodes_utils.hpp>
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/rev/core.hpp>
@@ -209,6 +211,141 @@ struct coupled_ode_system_impl<false, F, T_y0, Args...> {
    *   integrated function at the initial time-point. The last N*M
    *   elements are all zero as these are the Jacobian wrt to the
    *   parameters at the initial time-point, which is zero.
+   */
+  std::vector<double> initial_state() const {
+    std::vector<double> initial(size(), 0.0);
+    for (size_t i = 0; i < N_; i++) {
+      initial[i] = value_of(y0_(i));
+    }
+    for (size_t i = 0; i < num_y0_vars_; i++) {
+      initial[N_ + i * N_ + i] = 1.0;
+    }
+    return initial;
+  }
+};
+
+/**
+ * The <code>coupled_ode_system_impl</code> template specialization when
+ * the state or parameters are autodiff types and the user supplied the
+ * Jacobian of the right-hand side (see
+ * <code>internal::ode_jacobian_pair</code>).
+ *
+ * <p>The coupled state has the same layout as in the autodiff
+ * specialization. The sensitivity right-hand side
+ * \f$ \dot S = J_y S + J_\theta \f$ is computed from the user Jacobian,
+ * evaluated in doubles, instead of nested reverse-mode autodiff.
+ *
+ * @tparam F base ode system functor
+ * @tparam FJac Jacobian functor; takes the same arguments as F and returns
+ *   an N x (N + P) matrix, where P is the number of scalars of all
+ *   variadic arguments
+ */
+template <typename F, typename FJac, typename T_y0, typename... Args>
+struct coupled_ode_system_impl<false, internal::ode_jacobian_pair<F, FJac>,
+                               T_y0, Args...> {
+  const internal::ode_jacobian_pair<F, FJac>& f_;
+  const Eigen::Matrix<T_y0, Eigen::Dynamic, 1>& y0_;
+  std::tuple<plain_type_t<decltype(value_of(std::declval<const Args&>()))>...>
+      value_of_args_tuple_;
+  const size_t num_y0_vars_;
+  const size_t num_args_vars_;
+  const size_t N_;
+  size_t num_arg_columns_;
+  const std::vector<size_t> var_columns_;
+  std::ostream* msgs_;
+
+  coupled_ode_system_impl(const internal::ode_jacobian_pair<F, FJac>& f,
+                          const Eigen::Matrix<T_y0, Eigen::Dynamic, 1>& y0,
+                          std::ostream* msgs, const Args&... args)
+      : f_(f),
+        y0_(y0),
+        value_of_args_tuple_(value_of(args)...),
+        num_y0_vars_(count_vars(y0_)),
+        num_args_vars_(count_vars(args...)),
+        N_(y0.size()),
+        num_arg_columns_(0),
+        var_columns_(
+            internal::ode_jacobian_var_columns(num_arg_columns_, args...)),
+        msgs_(msgs) {}
+
+  /**
+   * Evaluate the user Jacobian at (t, y) and check its size.
+   *
+   * @param[in] t time
+   * @param[in] y state
+   * @return N x (N + P) Jacobian with respect to the state and to every
+   *   scalar of the variadic arguments
+   */
+  inline Eigen::MatrixXd user_jacobian(double t,
+                                       const Eigen::VectorXd& y) const {
+    return internal::eval_user_jacobian(
+        static_cast<std::tuple<Args...>*>(nullptr), "coupled_ode_system", f_, t,
+        std::tie(y), msgs_, value_of_args_tuple_, num_arg_columns_,
+        var_columns_);
+  }
+
+  /**
+   * Compute the sensitivity part of the coupled right-hand side,
+   * \f$ \dot S = J_y S + J_\theta \f$.
+   *
+   * @param[in] t time
+   * @param[in] y state
+   * @param[in] S sensitivities, N x (number of y0 vars + number of
+   *   argument vars), column-major
+   * @param[out] dS_dt time derivative of S, same layout
+   */
+  inline void sensitivity_rhs(double t, const Eigen::VectorXd& y,
+                              const double* S, double* dS_dt) const {
+    const size_t num_vars = num_y0_vars_ + num_args_vars_;
+    if (num_vars == 0) {
+      return;
+    }
+    const Eigen::MatrixXd jac = user_jacobian(t, y);
+    Eigen::Map<const Eigen::MatrixXd> S_map(S, N_, num_vars);
+    Eigen::Map<Eigen::MatrixXd> dS_map(dS_dt, N_, num_vars);
+    dS_map.noalias() = jac.leftCols(N_) * S_map;
+    for (size_t j = 0; j < num_args_vars_; ++j) {
+      dS_map.col(num_y0_vars_ + j) += jac.col(N_ + var_columns_[j]);
+    }
+  }
+
+  /**
+   * Calculates the right hand side of the coupled ode system (the regular
+   * ode system with forward sensitivities).
+   *
+   * @param[in] z state of the coupled ode system; this must be size
+   *   <code>size()</code>
+   * @param[out] dz_dt a vector of size <code>size()</code> with the
+   *    derivatives of the coupled system with respect to time
+   * @param[in] t time
+   * @throw exception if the base ode function does not return the
+   *    expected number of derivatives, N, or the Jacobian function does
+   *    not return an N x (N + P) matrix.
+   */
+  void operator()(const std::vector<double>& z, std::vector<double>& dz_dt,
+                  double t) const {
+    dz_dt.resize(size());
+    const Eigen::VectorXd y = Eigen::Map<const Eigen::VectorXd>(z.data(), N_);
+    const Eigen::VectorXd f_y_t
+        = math::apply([&](auto&&... args) { return f_(t, y, msgs_, args...); },
+                      value_of_args_tuple_);
+    check_size_match("coupled_ode_system", "dy_dt", f_y_t.size(), "states", N_);
+    Eigen::Map<Eigen::VectorXd>(dz_dt.data(), N_) = f_y_t;
+    sensitivity_rhs(t, y, z.data() + N_, dz_dt.data() + N_);
+  }
+
+  /**
+   * Returns the size of the coupled system.
+   *
+   * @return size of the coupled system.
+   */
+  size_t size() const { return N_ + N_ * num_y0_vars_ + N_ * num_args_vars_; }
+
+  /**
+   * Returns the initial state of the coupled system; see the autodiff
+   * specialization.
+   *
+   * @return the initial condition of the coupled system.
    */
   std::vector<double> initial_state() const {
     std::vector<double> initial(size(), 0.0);

@@ -4,6 +4,8 @@
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/rev/functor/cvodes_utils.hpp>
 #include <stan/math/rev/functor/coupled_ode_system.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
 #include <stan/math/rev/functor/ode_store_sensitivities.hpp>
 #include <stan/math/prim/err.hpp>
 #include <stan/math/prim/functor/apply.hpp>
@@ -53,6 +55,10 @@ class cvodes_integrator {
 
   const size_t num_y0_vars_;
   const size_t num_args_vars_;
+  // number of argument columns of a user Jacobian (see
+  // internal::ode_jacobian_pair); unused without one
+  size_t num_jac_arg_columns_;
+  std::vector<size_t> jac_var_columns_;
 
   coupled_ode_system<F, T_y0_t0, T_Args...> coupled_ode_;
 
@@ -120,6 +126,16 @@ class cvodes_integrator {
    * given time-point t and state y.
    */
   inline void jacobian_states(double t, const double y[], SUNMatrix J) const {
+    if constexpr (internal::is_ode_jacobian_pair<F>::value) {
+      const Eigen::VectorXd y_vec = Eigen::Map<const Eigen::VectorXd>(y, N_);
+      Eigen::Map<Eigen::MatrixXd>(SM_DATA_D(J), N_, N_)
+          = internal::eval_user_jacobian(
+                static_cast<std::tuple<T_Args...>*>(nullptr), function_name_,
+                f_, t, std::tie(y_vec), msgs_, value_of_args_tuple_,
+                num_jac_arg_columns_, jac_var_columns_)
+                .leftCols(N_);
+      return;
+    }
     Eigen::VectorXd fy;
     Eigen::MatrixXd Jfy;
 
@@ -146,6 +162,24 @@ class cvodes_integrator {
    */
   inline void rhs_sens(double t, const double y[], N_Vector* yS,
                        N_Vector* ySdot) {
+    if constexpr (internal::is_ode_jacobian_pair<F>::value
+                  && !std::is_arithmetic<
+                      return_type_t<T_y0_t0, T_Args...>>::value) {
+      // The sensitivity right-hand side needs only the user Jacobian; copy
+      // the sensitivities into one contiguous block for the matrix product
+      const size_t num_vars = num_y0_vars_ + num_args_vars_;
+      Eigen::MatrixXd S(N_, num_vars);
+      for (std::size_t s = 0; s < num_vars; s++) {
+        S.col(s) = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yS[s]), N_);
+      }
+      Eigen::MatrixXd dS_dt(N_, num_vars);
+      coupled_ode_.sensitivity_rhs(t, Eigen::Map<const Eigen::VectorXd>(y, N_),
+                                   S.data(), dS_dt.data());
+      for (std::size_t s = 0; s < num_vars; s++) {
+        Eigen::Map<Eigen::VectorXd>(NV_DATA_S(ySdot[s]), N_) = dS_dt.col(s);
+      }
+      return;
+    }
     std::vector<double> z(coupled_state_.size());
     std::vector<double> dz_dt;
     std::copy(y, y + N_, z.data());
@@ -208,6 +242,7 @@ class cvodes_integrator {
         max_num_steps_(max_num_steps),
         num_y0_vars_(count_vars(y0_)),
         num_args_vars_(count_vars(args...)),
+        num_jac_arg_columns_(0),
         coupled_ode_(f, y0_, msgs, args...),
         coupled_state_(coupled_ode_.initial_state()) {
     check_finite(function_name, "initial state", y0_);
@@ -233,6 +268,10 @@ class cvodes_integrator {
     check_positive_finite(function_name, "absolute_tolerance",
                           absolute_tolerance_);
     check_positive(function_name, "max_num_steps", max_num_steps_);
+    if constexpr (internal::is_ode_jacobian_pair<F>::value) {
+      jac_var_columns_
+          = internal::ode_jacobian_var_columns(num_jac_arg_columns_, args...);
+    }
 
     nv_state_ = N_VMake_Serial(N_, &coupled_state_[0], sundials_context_);
     nv_state_sens_ = nullptr;
