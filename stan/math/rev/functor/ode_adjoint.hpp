@@ -4,6 +4,7 @@
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/prim/fun/eval.hpp>
 #include <stan/math/rev/functor/cvodes_integrator_adjoint.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
 #include <ostream>
 #include <vector>
 
@@ -254,6 +255,47 @@ inline auto ode_adjoint_tol_ctl(
   return ode_adjoint_impl(
       "ode_adjoint_tol_ctl", std::forward<F>(f), y0, t0, ts,
       relative_tolerance_forward, absolute_tolerance_forward,
+      relative_tolerance_backward, absolute_tolerance_backward,
+      relative_tolerance_quadrature, absolute_tolerance_quadrature,
+      max_num_steps, num_steps_between_checkpoints, interpolation_polynomial,
+      solver_forward, solver_backward, msgs, args...);
+}
+
+/**
+ * Solve an ODE given its right-hand side and a user-supplied Jacobian of
+ * the right-hand side with the adjoint sensitivity method; see the
+ * <code>ode_adjoint_tol_ctl</code> overload without a Jacobian.
+ *
+ * <p>The Newton iterations of the forward and backward solves, the
+ * backward right-hand side \f$ -J_y^T \lambda \f$ and the quadrature
+ * \f$ -J_\theta^T \lambda \f$ use the user Jacobian, evaluated in doubles,
+ * instead of autodiff of the right-hand side.
+ *
+ * @param jac Jacobian of the right hand side; see
+ *   <code>internal::ode_jacobian_pair</code> for its convention.
+ * (other arguments as in the <code>ode_adjoint_tol_ctl</code> overload
+ * without a Jacobian)
+ */
+template <typename F, typename FJac, typename T_y0, typename T_t0,
+          typename T_ts, typename T_abs_tol_fwd, typename T_abs_tol_bwd,
+          typename... T_Args,
+          require_all_eigen_col_vector_t<T_y0, T_abs_tol_fwd,
+                                         T_abs_tol_bwd>* = nullptr>
+inline auto ode_adjoint_tol_ctl(
+    F&& f, FJac&& jac, const T_y0& y0, const T_t0& t0,
+    const std::vector<T_ts>& ts, double relative_tolerance_forward,
+    const T_abs_tol_fwd& absolute_tolerance_forward,
+    double relative_tolerance_backward,
+    const T_abs_tol_bwd& absolute_tolerance_backward,
+    double relative_tolerance_quadrature, double absolute_tolerance_quadrature,
+    long int max_num_steps,                  // NOLINT(runtime/int)
+    long int num_steps_between_checkpoints,  // NOLINT(runtime/int)
+    int interpolation_polynomial, int solver_forward, int solver_backward,
+    std::ostream* msgs, const T_Args&... args) {
+  return ode_adjoint_impl(
+      "ode_adjoint_tol_ctl",
+      internal::ode_jacobian_pair<std::decay_t<F>, std::decay_t<FJac>>(f, jac),
+      y0, t0, ts, relative_tolerance_forward, absolute_tolerance_forward,
       relative_tolerance_backward, absolute_tolerance_backward,
       relative_tolerance_quadrature, absolute_tolerance_quadrature,
       max_num_steps, num_steps_between_checkpoints, interpolation_polynomial,

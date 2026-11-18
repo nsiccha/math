@@ -26,18 +26,20 @@ namespace internal {
  *
  * <p>The Jacobian functor takes the same arguments as the right-hand side
  * and returns a matrix with one row per state and one column per state
- * followed by one column per scalar of the variadic arguments, in the
+ * followed by one column per real scalar of the variadic arguments, in the
  * order <code>count_vars</code> visits them (arguments left to right,
  * Eigen types column-major, arrays element by element, tuples element by
- * element). Columns belonging to data arguments are not read.
+ * element). Columns belonging to real data arguments are not read; integer
+ * arguments get no columns.
  *
  * @tparam F type of the right-hand side functor
  * @tparam FJac type of the Jacobian functor
  */
 template <typename F, typename FJac>
 struct ode_jacobian_pair {
-  const F& f_;
-  const FJac& jac_;
+  // held by value: the adjoint solver keeps its functor beyond the call
+  const std::decay_t<F> f_;
+  const std::decay_t<FJac> jac_;
 
   ode_jacobian_pair(const F& f, const FJac& jac) : f_(f), jac_(jac) {}
 
@@ -74,8 +76,8 @@ struct is_ode_jacobian_pair<ode_jacobian_pair<F, FJac>> : std::true_type {};
  * @param[in, out] var_columns column indices of the autodiff scalars seen
  */
 template <typename T>
-inline void ode_jacobian_var_columns_impl(const T& x, std::size_t& column,
-                                          std::vector<std::size_t>& var_columns) {
+inline void ode_jacobian_var_columns_impl(
+    const T& x, std::size_t& column, std::vector<std::size_t>& var_columns) {
   using T_plain = std::decay_t<T>;
   if constexpr (is_tuple<T_plain>::value) {
     math::apply(
@@ -98,8 +100,10 @@ inline void ode_jacobian_var_columns_impl(const T& x, std::size_t& column,
   } else if constexpr (is_var<T_plain>::value) {
     var_columns.push_back(column);
     ++column;
+  } else if constexpr (std::is_integral<T_plain>::value) {
+    // integer arguments are always data and get no columns
   } else {
-    static_assert(std::is_arithmetic<T_plain>::value,
+    static_assert(std::is_floating_point<T_plain>::value,
                   "ODE arguments must be scalars, Eigen types, std::vectors "
                   "or tuples of them");
     ++column;
@@ -110,8 +114,8 @@ inline void ode_jacobian_var_columns_impl(const T& x, std::size_t& column,
  * Columns of the parameter block of a user Jacobian that hold the
  * derivatives with respect to the autodiff scalars of the arguments.
  *
- * @param[out] num_columns number of scalars of all arguments, i.e. the
- *   number of columns of the parameter block
+ * @param[out] num_columns number of real scalars of all arguments, i.e.
+ *   the number of columns of the parameter block
  * @param args variadic arguments of the right-hand side
  * @return for the k-th autodiff scalar (in <code>count_vars</code> order)
  *   the index of its column within the parameter block

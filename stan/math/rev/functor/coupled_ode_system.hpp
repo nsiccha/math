@@ -330,11 +330,10 @@ struct coupled_ode_system_impl<false, internal::ode_jacobian_pair<F, FJac>,
                   double t) const {
     dz_dt.resize(size());
     const Eigen::VectorXd y = Eigen::Map<const Eigen::VectorXd>(z.data(), N_);
-    const Eigen::VectorXd f_y_t = math::apply(
-        [&](auto&&... args) { return f_(t, y, msgs_, args...); },
-        value_of_args_tuple_);
-    check_size_match("coupled_ode_system", "dy_dt", f_y_t.size(), "states",
-                     N_);
+    const Eigen::VectorXd f_y_t
+        = math::apply([&](auto&&... args) { return f_(t, y, msgs_, args...); },
+                      value_of_args_tuple_);
+    check_size_match("coupled_ode_system", "dy_dt", f_y_t.size(), "states", N_);
     Eigen::Map<Eigen::VectorXd>(dz_dt.data(), N_) = f_y_t;
     sensitivity_rhs(t, y, z.data() + N_, dz_dt.data() + N_);
   }

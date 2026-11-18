@@ -3,6 +3,7 @@
 
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/rev/functor/cvodes_integrator.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
 #include <stan/math/prim/fun/Eigen.hpp>
 #include <stan/math/prim/functor/apply.hpp>
 #include <ostream>
@@ -154,6 +155,57 @@ ode_adams(const F& f, const T_y0& y0, const T_t0& t0,
   long int max_num_steps = 1e8;  // NOLINT(runtime/int)
 
   return ode_adams_tol_impl("ode_adams", f, y0, t0, ts, relative_tolerance,
+                            absolute_tolerance, max_num_steps, msgs, args...);
+}
+
+/**
+ * Solve an ODE given its right-hand side and a user-supplied Jacobian of
+ * the right-hand side with the CVODES Adams-Moulton solver, using the given
+ * tolerances; see the <code>ode_adams_tol</code> overload without a Jacobian.
+ *
+ * <p>Sensitivities are computed from the user Jacobian, evaluated in
+ * doubles, instead of by autodiff of the right-hand side.
+ *
+ * @param jac Jacobian of the right hand side; see
+ *   <code>internal::ode_jacobian_pair</code> for its convention.
+ * (other arguments as in the <code>ode_adams_tol</code> overload without a
+ * Jacobian)
+ */
+template <typename F, typename FJac, typename T_y0, typename T_t0,
+          typename T_ts, typename... T_Args,
+          require_eigen_col_vector_t<T_y0>* = nullptr>
+inline std::vector<Eigen::Matrix<
+    stan::return_type_t<T_y0, T_t0, T_ts, T_Args...>, Eigen::Dynamic, 1>>
+ode_adams_tol(const F& f, const FJac& jac, const T_y0& y0, const T_t0& t0,
+              const std::vector<T_ts>& ts, double relative_tolerance,
+              double absolute_tolerance,
+              long int max_num_steps,  // NOLINT(runtime/int)
+              std::ostream* msgs, const T_Args&... args) {
+  const internal::ode_jacobian_pair<F, FJac> f_jac(f, jac);
+  return ode_adams_tol_impl("ode_adams_tol", f_jac, y0, t0, ts,
+                            relative_tolerance, absolute_tolerance,
+                            max_num_steps, msgs, args...);
+}
+
+/**
+ * Solve an ODE given its right-hand side and a user-supplied Jacobian of
+ * the right-hand side with the CVODES Adams-Moulton solver, using the default
+ * tolerances of <code>ode_adams</code>; see the <code>ode_adams_tol</code>
+ * overload taking a Jacobian.
+ */
+template <typename F, typename FJac, typename T_y0, typename T_t0,
+          typename T_ts, typename... T_Args,
+          require_eigen_col_vector_t<T_y0>* = nullptr>
+inline std::vector<Eigen::Matrix<
+    stan::return_type_t<T_y0, T_t0, T_ts, T_Args...>, Eigen::Dynamic, 1>>
+ode_adams(const F& f, const FJac& jac, const T_y0& y0, const T_t0& t0,
+          const std::vector<T_ts>& ts, std::ostream* msgs,
+          const T_Args&... args) {
+  double relative_tolerance = 1e-10;
+  double absolute_tolerance = 1e-10;
+  long int max_num_steps = 1e8;  // NOLINT(runtime/int)
+  const internal::ode_jacobian_pair<F, FJac> f_jac(f, jac);
+  return ode_adams_tol_impl("ode_adams", f_jac, y0, t0, ts, relative_tolerance,
                             absolute_tolerance, max_num_steps, msgs, args...);
 }
 

@@ -4,6 +4,7 @@
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/rev/functor/cvodes_utils.hpp>
 #include <stan/math/rev/functor/coupled_ode_system.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
 #include <stan/math/rev/functor/ode_store_sensitivities.hpp>
 #include <stan/math/prim/err.hpp>
 #include <stan/math/prim/functor/apply.hpp>
@@ -53,6 +54,9 @@ class cvodes_integrator {
 
   const size_t num_y0_vars_;
   const size_t num_args_vars_;
+  // number of argument columns of a user Jacobian (see
+  // internal::ode_jacobian_pair); unused without one
+  size_t num_jac_arg_columns_;
 
   coupled_ode_system<F, T_y0_t0, T_Args...> coupled_ode_;
 
@@ -127,8 +131,9 @@ class cvodes_integrator {
           value_of_args_tuple_);
       check_size_match("cvodes_integrator", "rows of the Jacobian", jac.rows(),
                        "states", N_);
-      check_greater_or_equal("cvodes_integrator", "columns of the Jacobian",
-                             jac.cols(), N_);
+      check_size_match("cvodes_integrator", "columns of the Jacobian",
+                       jac.cols(), "states plus argument scalars",
+                       N_ + num_jac_arg_columns_);
       Eigen::Map<Eigen::MatrixXd>(SM_DATA_D(J), N_, N_) = jac.leftCols(N_);
       return;
     }
@@ -169,8 +174,8 @@ class cvodes_integrator {
         S.col(s) = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yS[s]), N_);
       }
       Eigen::MatrixXd dS_dt(N_, num_vars);
-      coupled_ode_.sensitivity_rhs(
-          t, Eigen::Map<const Eigen::VectorXd>(y, N_), S.data(), dS_dt.data());
+      coupled_ode_.sensitivity_rhs(t, Eigen::Map<const Eigen::VectorXd>(y, N_),
+                                   S.data(), dS_dt.data());
       for (std::size_t s = 0; s < num_vars; s++) {
         Eigen::Map<Eigen::VectorXd>(NV_DATA_S(ySdot[s]), N_) = dS_dt.col(s);
       }
@@ -238,6 +243,7 @@ class cvodes_integrator {
         max_num_steps_(max_num_steps),
         num_y0_vars_(count_vars(y0_)),
         num_args_vars_(count_vars(args...)),
+        num_jac_arg_columns_(0),
         coupled_ode_(f, y0_, msgs, args...),
         coupled_state_(coupled_ode_.initial_state()) {
     check_finite(function_name, "initial state", y0_);
@@ -263,6 +269,9 @@ class cvodes_integrator {
     check_positive_finite(function_name, "absolute_tolerance",
                           absolute_tolerance_);
     check_positive(function_name, "max_num_steps", max_num_steps_);
+    if constexpr (internal::is_ode_jacobian_pair<F>::value) {
+      internal::ode_jacobian_var_columns(num_jac_arg_columns_, args...);
+    }
 
     nv_state_ = N_VMake_Serial(N_, &coupled_state_[0], sundials_context_);
     nv_state_sens_ = nullptr;

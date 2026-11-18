@@ -34,16 +34,16 @@ auto solve(Solver solver, const TY0& y0, double t0,
   Jac jac;
   if (solver == Solver::rk45) {
     if constexpr (UseJac) {
-      return stan::math::ode_rk45_jac_tol(f, jac, y0, t0, ts, rtol, atol,
-                                          max_steps, nullptr, theta);
+      return stan::math::ode_rk45_tol(f, jac, y0, t0, ts, rtol, atol, max_steps,
+                                      nullptr, theta);
     } else {
       return stan::math::ode_rk45_tol(f, y0, t0, ts, rtol, atol, max_steps,
                                       nullptr, theta);
     }
   } else {
     if constexpr (UseJac) {
-      return stan::math::ode_bdf_jac_tol(f, jac, y0, t0, ts, rtol, atol,
-                                         max_steps, nullptr, theta);
+      return stan::math::ode_bdf_tol(f, jac, y0, t0, ts, rtol, atol, max_steps,
+                                     nullptr, theta);
     } else {
       return stan::math::ode_bdf_tol(f, y0, t0, ts, rtol, atol, max_steps,
                                      nullptr, theta);
@@ -192,8 +192,8 @@ template <typename Rhs, typename Jac>
 void bench(const std::string& name, Solver solver, const VectorXd& y0,
            bool y0_var, double t0, const std::vector<double>& ts, double rtol,
            double atol, const VectorXd& theta, double budget_s) {
-  const auto ad
-      = run_once<false, Rhs, Jac>(solver, y0, y0_var, t0, ts, rtol, atol, theta);
+  const auto ad = run_once<false, Rhs, Jac>(solver, y0, y0_var, t0, ts, rtol,
+                                            atol, theta);
   const auto uj
       = run_once<true, Rhs, Jac>(solver, y0, y0_var, t0, ts, rtol, atol, theta);
   const auto [t_ad, t_uj] = time_runs<Rhs, Jac>(solver, y0, y0_var, t0, ts,
