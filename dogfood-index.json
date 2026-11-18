@@ -10,7 +10,7 @@
     "ref": "develop",
     "sha": "a1810b7792bb61ecdb93f511a19cafe6d52beda2"
   },
-  "prepared_at": "2026-11-18T19:46:03Z",
+  "prepared_at": "2026-11-18T19:58:28Z",
   "problems": [
     {
       "id": "dde-core",
@@ -277,6 +277,15 @@
           ],
           "result": "passed",
           "detail": "12 tests passed. Exercises dosing events, DDE continuation, and derivatives."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math 4d8524e95e3d171a8cb59957a65ca4f8a6a9a259, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_solve_dde_rk45_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "12 tests passed. The original DDE dosing interface agrees with its reference values and derivatives."
         }
       ]
     },
@@ -634,7 +643,7 @@
       "upstream_refs": [],
       "draft": {
         "title": "ODE models should retain their right-hand-side functor after construction",
-        "prepared_at": "2026-11-18T19:46:03Z",
+        "prepared_at": "2026-11-18T19:58:28Z",
         "body": "In Torsten Math develop at `bb8266ea`, the event model factory constructs a PKODEModel with its own by-value copy of the right-hand-side functor. The model stores an ode_rhs_ostream_adaptor whose functor member refers to that copy. When construction returns, the reference is dangling. Stateful C++ right-hand sides need their stored parameters to remain valid for every later evaluation during the solve.\n\nThe adaptor can own the functor by value. The [single-header fix](https://github.com/nsiccha/torsten_math/commit/94c7d7472379412df5a6dfe6badc20ae3c41113b) applies directly to that upstream revision. It can be taken independently of support for user-supplied Jacobians."
       },
       "fix": {
@@ -661,7 +670,17 @@
           "why": "This is the isolated fix for the model adaptor. It applies cleanly to metrumresearchgroup/torsten_math develop at bb8266ea."
         }
       ],
-      "validation": []
+      "validation": [
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math 4d8524e95e3d171a8cb59957a65ca4f8a6a9a259, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_solve_ode_jacobian_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "The ODE suite passed all 15 tests on the integrated fix. The transient and steady-state tests for RK45, BDF and Adams each verify that the stateful counting Jacobian was called."
+        }
+      ]
     },
     {
       "id": "torsten-solver-jacobians",
@@ -707,7 +726,44 @@
           "why": "This compiler revision accepts all four two-function calling forms in Stan. C++ callers can use the headers directly."
         }
       ],
-      "validation": []
+      "validation": [
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math 4d8524e95e3d171a8cb59957a65ca4f8a6a9a259, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_solve_ode_jacobian_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "15 tests passed. All three ODE solvers agree with nested autodiff for transient and steady-state schedules, including data-only parameters. The largest gradient difference divided by (1 + |autodiff gradient|) was 5.95e-14. A scaled Jacobian changes the calculated gradient."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math 4d8524e95e3d171a8cb59957a65ca4f8a6a9a259, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_solve_dde_rk45_jacobian_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "6 tests passed. DDE values and gradients agree with nested autodiff over transient and steady-state schedules, including delayed feedback. The largest gradient difference divided by (1 + |autodiff gradient|) was 3.33e-13. A scaled Jacobian changes the calculated gradient."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math 4d8524e95e3d171a8cb59957a65ca4f8a6a9a259, GCC 15.2.0, C++17, -O1, STAN_THREADS=true, STAN_MATH_CHECK_USER_JACOBIAN enabled",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_solve_ode_jacobian_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "15 tests passed. All three ODE solvers agree with nested autodiff for transient and steady-state schedules, including data-only parameters. The largest gradient difference divided by (1 + |autodiff gradient|) was 5.95e-14. The autodiff check rejects a scaled Jacobian."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math 4d8524e95e3d171a8cb59957a65ca4f8a6a9a259, GCC 15.2.0, C++17, -O1, STAN_THREADS=true, STAN_MATH_CHECK_USER_JACOBIAN enabled",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_solve_dde_rk45_jacobian_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "6 tests passed. DDE values and gradients agree with nested autodiff over transient and steady-state schedules, including delayed feedback. The largest gradient difference divided by (1 + |autodiff gradient|) was 3.33e-13. The autodiff check rejects a scaled Jacobian."
+        }
+      ]
     }
   ]
 }
