@@ -174,7 +174,7 @@ namespace torsten {
     /// right hand side on the interval that ends at this event
     dsolve::PMXDdeRhs rhs;
     /// steady-state dosing: SS flag, interval, amount (bioavailability
-    /// included), rate (bioavailability included) and infusion duration
+    /// included), rate and infusion duration (bioavailability included)
     int ss;
     double ii;
     Eigen::VectorXd ii_sensitivities;
@@ -279,17 +279,17 @@ namespace torsten {
       e.ss_rate = 0;
       e.ss_duration = 0;
       if (events.is_ss_dosing(i)) {
-        // Torsten's transient semantics of an infusion: the rate is the
-        // dosing rate times the bioavailability, its duration amt / rate
+        // an infusion keeps the dosing rate, and the bioavailability sets
+        // its duration f * amt / rate, as for transient doses
         const auto& f_cmt = em.params.bioavailability(i, ev.cmt - 1);
         const auto ss_amount = em.fractioned_amt(i);
         e.ss_amount = value_of(ss_amount);
         e.ss_amount_sensitivities = local.gradient(ss_amount);
-        const auto ss_rate = events.rate(i) * f_cmt;
+        const auto& ss_rate = events.rate(i);
         e.ss_rate = value_of(ss_rate);
         e.ss_rate_sensitivities = local.gradient(ss_rate);
         if (events.rate(i) > 0 && events.amt(i) > 0) {
-          const auto duration = events.amt(i) / events.rate(i);
+          const auto duration = f_cmt * events.amt(i) / events.rate(i);
           e.ss_duration = value_of(duration);
           e.ss_duration_sensitivities = local.gradient(duration);
         }

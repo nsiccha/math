@@ -27,8 +27,6 @@ TYPED_TEST_P(test_coupled_twocpt, single_bolus) {
   this -> compare_solvers_adj(this -> amt, 1.e-8, "AMT");
   this -> compare_solvers_adj(this -> theta[0], 1.5e-5, "theta");
   this -> compare_solvers_adj(this -> time, 1.e-2, "time");
-
-  // FIXME: lag time sensitivity
 }
 
 TYPED_TEST_P(test_coupled_twocpt, multiple_bolus) {
@@ -38,6 +36,13 @@ TYPED_TEST_P(test_coupled_twocpt, multiple_bolus) {
   this -> compare_solvers_adj(this -> amt, 1.e-8, "AMT");
   this -> compare_solvers_adj(this -> theta[0], 1.5e-5, "theta");
   this -> compare_solvers_adj(this -> biovar[0], 5.e-6, "bioavailability");
+
+  // a lag time moves each dose, and with it the start of the coupled
+  // solver's ODE step, whose sensitivity is kept: after the first dose the
+  // PD part is away from equilibrium there, so dropping it would show. The
+  // lagged doses (0.35, 1.55, 2.75, 3.95) miss every observation time.
+  this -> tlag[0][0] = 0.35;
+  this -> compare_solvers_adj(this -> tlag[0], 1.e-6, "lag time");
 }
 
 TYPED_TEST_P(test_coupled_twocpt, multiple_infusion) {

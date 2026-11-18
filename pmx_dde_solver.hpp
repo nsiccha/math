@@ -273,7 +273,7 @@ namespace torsten {
      * The right hand side of the regimen is that of the dosing event, with
      * only the regimen's own infusions; infusions of the regimen still
      * running at the dose are dropped afterwards, as in Torsten's ODE
-     * solvers. An infusion has rate RATE x F and duration AMT / RATE, as for
+     * solvers. An infusion has rate RATE and duration F x AMT / RATE, as for
      * transient doses.
      */
     void steady_state(const PMXDdeEvent& e) {
