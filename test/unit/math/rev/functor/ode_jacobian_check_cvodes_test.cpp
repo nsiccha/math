@@ -84,38 +84,7 @@ struct dde_jac {
   }
 };
 
-template <bool Right>
-struct ode_pull {
-  template <typename T_t, typename T_y, typename T_theta>
-  Eigen::VectorXd operator()(const T_t& t, const T_y& y,
-                             const Eigen::VectorXd& lambda, std::ostream* msgs,
-                             const T_theta& theta) const {
-    Eigen::VectorXd g = ode_jac<true>()(t, y, msgs, theta).transpose() * lambda;
-    if (!Right) {
-      g(1) *= 2;
-    }
-    return g;
-  }
-};
-
 const std::vector<double> ts{0.5, 1.0, 2.0};
-
-template <bool Right>
-void solve_adjoint_pull() {
-  Eigen::VectorXd y0(1);
-  y0 << 0.5;
-  std::vector<var> theta{1.5, 0.3};
-  const Eigen::VectorXd atol = Eigen::VectorXd::Constant(1, 1e-8);
-  auto ys = stan::math::ode_adjoint_tol_ctl(
-      ode_rhs(), ode_jac<true>(), ode_pull<Right>(), y0, 0.0, ts, 1e-8, atol,
-      1e-8, atol, 1e-8, 1e-8, 100000, 150, 1, 2, 2, nullptr, theta);
-  // seed every output so that the backward solve runs with lambda != 0
-  var lp = 0;
-  for (const auto& y : ys) {
-    lp += y(0);
-  }
-  lp.grad();
-}
 
 template <bool Right>
 void solve_all() {
@@ -167,12 +136,5 @@ TEST(user_jacobian_check, wrong_jacobians_throw) {
   EXPECT_THROW(stan::math::dde_rk45(dde_rhs(), dde_jac<false>(), y0, 0.0, ts,
                                     tau, nullptr, a),
                std::domain_error);
-  stan::math::recover_memory();
-}
-
-TEST(user_jacobian_check, pullback) {
-  EXPECT_NO_THROW(solve_adjoint_pull<true>());
-  stan::math::recover_memory();
-  EXPECT_THROW(solve_adjoint_pull<false>(), std::domain_error);
   stan::math::recover_memory();
 }

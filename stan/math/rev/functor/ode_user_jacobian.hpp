@@ -267,45 +267,6 @@ inline Eigen::MatrixXd eval_user_jacobian(
 }
 
 /**
- * Evaluate the user pullback lambda^T [df/dy | df/dargs] of a right-hand
- * side paired with it (see <code>ode_jacobian_pullback_pair</code>) and
- * check its size. With <code>STAN_MATH_CHECK_USER_JACOBIAN</code> defined,
- * also compare the entries the solver reads (states and autodiff
- * arguments) with the autodiff Jacobian applied to lambda.
- *
- * @return the vector of length N + P
- */
-template <typename... Origs, typename F, typename FJac, typename FPull,
-          typename... Args>
-inline Eigen::VectorXd eval_user_pullback(
-    const std::tuple<Origs...>* /* original argument types */,
-    const char* function, const ode_jacobian_pullback_pair<F, FJac, FPull>& f,
-    double t, const Eigen::VectorXd& y, const Eigen::VectorXd& lambda,
-    std::ostream* msgs, const std::tuple<Args...>& args, size_t num_arg_columns,
-    const std::vector<size_t>& var_columns) {
-  Eigen::VectorXd g = math::apply(
-      [&](const auto&... a) { return f.pullback(t, y, lambda, msgs, a...); },
-      args);
-  check_size_match(function, "size of the pullback", g.size(),
-                   "states plus argument scalars", y.size() + num_arg_columns);
-#ifdef STAN_MATH_CHECK_USER_JACOBIAN
-  const Eigen::MatrixXd jac_ad = autodiff_user_jacobian<false, Origs...>(
-      f.f_, t, std::tie(y), msgs, args);
-  const Eigen::MatrixXd g_sel
-      = select_user_jacobian_columns(g.transpose(), y.size(), var_columns);
-  const double difference
-      = user_jacobian_difference(g_sel, (lambda.transpose() * jac_ad).eval());
-  if (difference > STAN_MATH_USER_JACOBIAN_TOLERANCE) {
-    throw_domain_error(function, "the user pullback", difference,
-                       "differs from the autodiff pullback by ",
-                       " (largest difference relative to max(1, |autodiff "
-                       "entry|))");
-  }
-#endif
-  return g;
-}
-
-/**
  * Whether f(t, states..., msgs, args...) is callable with the element types
  * of the two tuples.
  */

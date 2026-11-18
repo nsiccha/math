@@ -395,78 +395,6 @@ void bench_pullback(const std::string& name, const VectorXd& y,
             << std::endl;
 }
 
-/** End-to-end ode_adjoint_tol_ctl gradient: AD, (f, jac), (f, jac, pull). */
-template <typename Rhs, typename Jac, typename Pull>
-void bench_adjoint(const std::string& name, const VectorXd& y0, bool y0_var,
-                   const std::vector<double>& ts, const VectorXd& theta,
-                   double budget_s) {
-  const double tol = 1e-8;
-  const VectorXd atol = VectorXd::Constant(y0.size(), tol);
-  auto run = [&](int path) {
-    Result res;
-    {
-      Eigen::Matrix<var, -1, 1> theta_v = theta.template cast<var>();
-      Eigen::Matrix<var, -1, 1> y0_v = y0.template cast<var>();
-      auto solve = [&](const auto& y0_a) {
-        if (path == 0) {
-          return stan::math::ode_adjoint_tol_ctl(
-              Rhs(), y0_a, 0.0, ts, tol, atol, tol, atol, tol, tol, 100000000,
-              150, 1, 2, 2, nullptr, theta_v);
-        } else if (path == 1) {
-          return stan::math::ode_adjoint_tol_ctl(
-              Rhs(), Jac(), y0_a, 0.0, ts, tol, atol, tol, atol, tol, tol,
-              100000000, 150, 1, 2, 2, nullptr, theta_v);
-        } else {
-          return stan::math::ode_adjoint_tol_ctl(
-              Rhs(), Jac(), Pull(), y0_a, 0.0, ts, tol, atol, tol, atol, tol,
-              tol, 100000000, 150, 1, 2, 2, nullptr, theta_v);
-        }
-      };
-      std::vector<Eigen::Matrix<var, -1, 1>> sol
-          = y0_var ? solve(y0_v) : solve(y0);
-      var lp = 0;
-      for (size_t i = 0; i < sol.size(); ++i) {
-        for (int k = 0; k < sol[i].size(); ++k) {
-          lp += (1.0 + 0.1 * std::sin(1.0 + i + 7.0 * k)) * sol[i](k);
-          res.vals.push_back(sol[i](k).val());
-        }
-      }
-      lp.grad();
-      for (int j = 0; j < theta_v.size(); ++j) {
-        res.grads.push_back(theta_v(j).adj());
-      }
-      if (y0_var) {
-        for (int j = 0; j < y0_v.size(); ++j) {
-          res.grads.push_back(y0_v(j).adj());
-        }
-      }
-    }
-    stan::math::recover_memory();
-    return res;
-  };
-  const Result r_ad = run(0), r_jac = run(1), r_pull = run(2);
-  const double first = seconds([&] { run(0); }) + seconds([&] { run(1); })
-                       + seconds([&] { run(2); });
-  const int reps
-      = std::max(7, std::min(2000, static_cast<int>(budget_s / first)));
-  std::vector<double> t_ad, t_jac, t_pull;
-  for (int r = 0; r < reps; ++r) {
-    t_ad.push_back(seconds([&] { run(0); }));
-    t_jac.push_back(seconds([&] { run(1); }));
-    t_pull.push_back(seconds([&] { run(2); }));
-  }
-  const double a = median(t_ad), b = median(t_jac), c = median(t_pull);
-  std::cout << std::left << std::setw(10) << name << std::right << std::setw(4)
-            << Rhs::N << std::setw(5) << theta.size() + (y0_var ? y0.size() : 0)
-            << std::fixed << std::setprecision(3) << std::setw(9) << a * 1e3
-            << std::setw(9) << b * 1e3 << std::setw(9) << c * 1e3
-            << std::setprecision(1) << std::setw(7) << a / b << std::setw(7)
-            << a / c << std::setw(7) << b / c << std::scientific
-            << std::setprecision(1) << std::setw(9)
-            << max_rel_diff(r_ad.grads, r_pull.grads, tol) << std::setw(9)
-            << max_rel_diff(r_jac.grads, r_pull.grads, tol) << std::endl;
-}
-
 std::vector<double> linspace_ts(double a, double b, int n) {
   std::vector<double> ts(n);
   for (int i = 0; i < n; ++i) {
@@ -537,24 +465,5 @@ int main(int argc, char** argv) {
       "transit30", VectorXd::Constant(32, 0.5), tr_th);
   bench_pullback<rd20_rhs, rd20_jac, rd20_pull>("rd20", bump(20), rd_th);
   bench_pullback<rd50_rhs, rd50_jac, rd50_pull>("rd50", bump(50), rd_th);
-  std::cout << "\nAdjoint end to end, ode_adjoint_tol_ctl (BDF both ways, "
-               "tol 1e-8): one gradient [ms]\n"
-            << "model       N sens   AD[ms]  jac[ms] pull[ms] AD/jac AD/pull "
-               "jac/pull dgrad(AD) dgrad(jac)"
-            << std::endl;
-  bench_adjoint<pk2_rhs, pk2_jac, pk2_pull>("pk2", pk2_y0, false, ts_pk, pk2_th,
-                                            budget);
-  bench_adjoint<idr_rhs, idr_jac, idr_pull>(
-      "idr", idr_y0, false, linspace_ts(1, 48, 24), idr_th, budget);
-  bench_adjoint<transit30_rhs, transit30_jac, transit30_pull>(
-      "transit30", tr30_y0, false, ts_pk, tr_th, budget);
-  bench_adjoint<rd20_rhs, rd20_jac, rd20_pull>("rd20", bump(20), false, ts_rd,
-                                               rd_th, budget);
-  bench_adjoint<rd20_rhs, rd20_jac, rd20_pull>("rd20 +y0", bump(20), true,
-                                               ts_rd, rd_th, budget);
-  bench_adjoint<rd50_rhs, rd50_jac, rd50_pull>("rd50", bump(50), false, ts_rd,
-                                               rd_th, budget);
-  bench_adjoint<rd50_rhs, rd50_jac, rd50_pull>("rd50 +y0", bump(50), true,
-                                               ts_rd, rd_th, budget);
   return 0;
 }

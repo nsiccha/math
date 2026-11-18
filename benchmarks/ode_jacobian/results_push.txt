@@ -19,6 +19,8 @@ rd20         20    2     1.10     0.34     0.09    3.2   12.2    3.8   8.7e-16
 rd50         50    2     1.96     0.72     0.19    2.7   10.3    3.8   3.6e-15
 
 Adjoint end to end, ode_adjoint_tol_ctl (BDF both ways, tol 1e-8): one gradient [ms]
+(measured with the prototype overload ode_adjoint_tol_ctl(f, jac, pullback, ...) of commit 1e8207af3d,
+ not adopted (decision 0mwfr7o) and reverted; these rows are not produced by the current bench_push)
 model       N sens   AD[ms]  jac[ms] pull[ms] AD/jac AD/pull jac/pull dgrad(AD) dgrad(jac)
 pk2          3    5    1.066    0.895    0.813    1.2    1.3    1.1  1.5e-07  0.0e+00
 idr          3    7    1.489    1.384    1.276    1.1    1.2    1.1  1.5e-07  0.0e+00
