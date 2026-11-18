@@ -3,6 +3,7 @@
 
 #include <stan/math/prim/functor/coupled_ode_system.hpp>
 #include <stan/math/prim/functor/ode_jacobian_pair.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
 #include <stan/math/rev/functor/cvodes_utils.hpp>
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/rev/core.hpp>
@@ -277,15 +278,10 @@ struct coupled_ode_system_impl<false, internal::ode_jacobian_pair<F, FJac>,
    */
   inline Eigen::MatrixXd user_jacobian(double t,
                                        const Eigen::VectorXd& y) const {
-    Eigen::MatrixXd jac = math::apply(
-        [&](auto&&... args) { return f_.jacobian(t, y, msgs_, args...); },
-        value_of_args_tuple_);
-    check_size_match("coupled_ode_system", "rows of the Jacobian", jac.rows(),
-                     "states", N_);
-    check_size_match("coupled_ode_system", "columns of the Jacobian",
-                     jac.cols(), "states plus argument scalars",
-                     N_ + num_arg_columns_);
-    return jac;
+    return internal::eval_user_jacobian(
+        static_cast<std::tuple<Args...>*>(nullptr), "coupled_ode_system", f_, t,
+        std::tie(y), msgs_, value_of_args_tuple_, num_arg_columns_,
+        var_columns_);
   }
 
   /**

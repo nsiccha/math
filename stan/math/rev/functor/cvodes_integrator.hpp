@@ -5,6 +5,7 @@
 #include <stan/math/rev/functor/cvodes_utils.hpp>
 #include <stan/math/rev/functor/coupled_ode_system.hpp>
 #include <stan/math/prim/functor/ode_jacobian_pair.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
 #include <stan/math/rev/functor/ode_store_sensitivities.hpp>
 #include <stan/math/prim/err.hpp>
 #include <stan/math/prim/functor/apply.hpp>
@@ -57,6 +58,7 @@ class cvodes_integrator {
   // number of argument columns of a user Jacobian (see
   // internal::ode_jacobian_pair); unused without one
   size_t num_jac_arg_columns_;
+  std::vector<size_t> jac_var_columns_;
 
   coupled_ode_system<F, T_y0_t0, T_Args...> coupled_ode_;
 
@@ -126,15 +128,12 @@ class cvodes_integrator {
   inline void jacobian_states(double t, const double y[], SUNMatrix J) const {
     if constexpr (internal::is_ode_jacobian_pair<F>::value) {
       const Eigen::VectorXd y_vec = Eigen::Map<const Eigen::VectorXd>(y, N_);
-      Eigen::MatrixXd jac = math::apply(
-          [&](auto&&... args) { return f_.jacobian(t, y_vec, msgs_, args...); },
-          value_of_args_tuple_);
-      check_size_match("cvodes_integrator", "rows of the Jacobian", jac.rows(),
-                       "states", N_);
-      check_size_match("cvodes_integrator", "columns of the Jacobian",
-                       jac.cols(), "states plus argument scalars",
-                       N_ + num_jac_arg_columns_);
-      Eigen::Map<Eigen::MatrixXd>(SM_DATA_D(J), N_, N_) = jac.leftCols(N_);
+      Eigen::Map<Eigen::MatrixXd>(SM_DATA_D(J), N_, N_)
+          = internal::eval_user_jacobian(
+                static_cast<std::tuple<T_Args...>*>(nullptr), function_name_,
+                f_, t, std::tie(y_vec), msgs_, value_of_args_tuple_,
+                num_jac_arg_columns_, jac_var_columns_)
+                .leftCols(N_);
       return;
     }
     Eigen::VectorXd fy;
@@ -270,7 +269,8 @@ class cvodes_integrator {
                           absolute_tolerance_);
     check_positive(function_name, "max_num_steps", max_num_steps_);
     if constexpr (internal::is_ode_jacobian_pair<F>::value) {
-      internal::ode_jacobian_var_columns(num_jac_arg_columns_, args...);
+      jac_var_columns_
+          = internal::ode_jacobian_var_columns(num_jac_arg_columns_, args...);
     }
 
     nv_state_ = N_VMake_Serial(N_, &coupled_state_[0], sundials_context_);

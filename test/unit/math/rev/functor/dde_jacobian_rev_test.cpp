@@ -221,3 +221,19 @@ TEST(dde_jacobian, wrong_size_throws) {
                std::invalid_argument);
   stan::math::recover_memory();
 }
+
+/** dde_jacobian_error: round-off for the right Jacobian, large otherwise. */
+TEST(dde_jacobian, dde_jacobian_error) {
+  Eigen::VectorXd y(2), theta(2);
+  y << 1.0, 0.5;
+  theta << 0.8, 0.5;
+  Eigen::MatrixXd y_lag(2, 2);
+  y_lag << 0.9, 1.1, 0.4, 0.6;
+  EXPECT_LT(stan::math::dde_jacobian_error(lag_rhs(), lag_jac(), 1.0, y, y_lag,
+                                           nullptr, theta, x_r, x_i, 0.3),
+            1e-14);
+  EXPECT_GT(
+      stan::math::dde_jacobian_error(lag_rhs(), lag_state_only_jac(), 1.0, y,
+                                     y_lag, nullptr, theta, x_r, x_i, 0.3),
+      0.1);
+}

@@ -429,3 +429,28 @@ TEST(ode_jacobian, var_columns) {
                                 + stan::math::count_vars(two_five));
   stan::math::recover_memory();
 }
+
+/**
+ * ode_jacobian_error is round-off for the right Jacobian and large for a
+ * wrong one, with autodiff or data arguments alike.
+ */
+TEST(ode_jacobian, ode_jacobian_error) {
+  const Eigen::VectorXd y = y0_d();
+  EXPECT_LT(stan::math::ode_jacobian_error(mixed_rhs(), mixed_jac(), 0.3, y,
+                                           nullptr, theta_d(), x_r, x_i, k_d),
+            1e-14);
+  var_inputs in;
+  EXPECT_LT(
+      stan::math::ode_jacobian_error(mixed_rhs(), mixed_jac(), in.t0, in.y0,
+                                     nullptr, in.theta, x_r, x_i, in.k),
+      1e-14);
+  EXPECT_GT(
+      stan::math::ode_jacobian_error(mixed_rhs(), state_only_jac(), 0.3, y,
+                                     nullptr, theta_d(), x_r, x_i, k_d),
+      0.1);
+  EXPECT_THROW(
+      stan::math::ode_jacobian_error(mixed_rhs(), short_jac(), 0.3, y, nullptr,
+                                     theta_d(), x_r, x_i, k_d),
+      std::invalid_argument);
+  stan::math::recover_memory();
+}

@@ -5,6 +5,7 @@
 #include <stan/math/rev/core/save_varis.hpp>
 #include <stan/math/rev/functor/cvodes_utils.hpp>
 #include <stan/math/prim/functor/ode_jacobian_pair.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
 #include <stan/math/rev/functor/ode_store_sensitivities.hpp>
 #include <stan/math/prim/err.hpp>
 #include <stan/math/prim/fun/value_of.hpp>
@@ -590,18 +591,11 @@ class cvodes_integrator_adjoint_vari : public vari_base {
   inline Eigen::MatrixXd user_jacobian(double t, N_Vector y) const {
     const Eigen::VectorXd y_vec
         = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(y), N_);
-    Eigen::MatrixXd jac = math::apply(
-        [&](auto&&... args) {
-          return solver_->f_.jacobian(t, y_vec, msgs_, args...);
-        },
-        solver_->value_of_args_tuple_);
-    check_size_match(solver_->function_name_str_.c_str(),
-                     "rows of the Jacobian", jac.rows(), "states", N_);
-    check_size_match(solver_->function_name_str_.c_str(),
-                     "columns of the Jacobian", jac.cols(),
-                     "states plus argument scalars",
-                     N_ + solver_->jac_num_arg_columns_);
-    return jac;
+    return internal::eval_user_jacobian(
+        static_cast<std::tuple<T_Args...>*>(nullptr),
+        solver_->function_name_str_.c_str(), solver_->f_, t, std::tie(y_vec),
+        msgs_, solver_->value_of_args_tuple_, solver_->jac_num_arg_columns_,
+        solver_->jac_var_columns_);
   }
 
   /**

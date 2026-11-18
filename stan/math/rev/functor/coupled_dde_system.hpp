@@ -3,6 +3,7 @@
 
 #include <stan/math/prim/functor/coupled_dde_system.hpp>
 #include <stan/math/prim/functor/ode_jacobian_pair.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/rev/core.hpp>
 #include <stan/math/rev/fun/value_of.hpp>
@@ -307,17 +308,10 @@ struct coupled_dde_system_impl<false, internal::ode_jacobian_pair<F, FJac>,
     if (num_params == 0) {
       return;
     }
-    const Eigen::MatrixXd jac = math::apply(
-        [&](auto&&... args) {
-          return f_.jacobian(t, y, y_lag, msgs_, args...);
-        },
-        value_of_args_tuple_);
-    check_size_match("coupled_dde_system", "rows of the Jacobian", jac.rows(),
-                     "states", N_);
-    check_size_match("coupled_dde_system", "columns of the Jacobian",
-                     jac.cols(),
-                     "states times (1 + delays) plus argument scalars",
-                     N_ * (1 + D_) + num_arg_columns_);
+    const Eigen::MatrixXd jac = internal::eval_user_jacobian(
+        static_cast<std::tuple<Args...>*>(nullptr), "coupled_dde_system", f_, t,
+        std::tie(y, y_lag), msgs_, value_of_args_tuple_, num_arg_columns_,
+        var_columns_);
     Eigen::Map<const Eigen::MatrixXd> S(z.data() + N_, N_, num_params);
     Eigen::Map<Eigen::MatrixXd> dS(dz_dt.data() + N_, N_, num_params);
     dS.noalias() = jac.leftCols(N_) * S;

@@ -12,6 +12,7 @@
 #include <stan/math/prim/functor/for_each.hpp>
 #include <stan/math/prim/functor/apply.hpp>
 #include <stan/math/prim/functor/ode_jacobian_pair.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
 #include <sunmatrix/sunmatrix_dense.h>
 #include <idas/idas.h>
 #include <nvector/nvector_serial.h>
@@ -147,17 +148,10 @@ class dae_system {
         = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yy), N);
     const Eigen::VectorXd yp_vec
         = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yp), N);
-    Eigen::MatrixXd jac = math::apply(
-        [&](auto&&... args) {
-          return f_.jacobian(t, yy_vec, yp_vec, msgs_, args...);
-        },
-        dbl_args_tuple_);
-    check_size_match("dae_system", "rows of the Jacobian", jac.rows(), "states",
-                     N);
-    check_size_match("dae_system", "columns of the Jacobian", jac.cols(),
-                     "two times states plus argument scalars",
-                     2 * N + jac_num_arg_columns_);
-    return jac;
+    return internal::eval_user_jacobian(
+        static_cast<std::tuple<T_par...>*>(nullptr), "dae_system", f_, t,
+        std::tie(yy_vec, yp_vec), msgs_, dbl_args_tuple_, jac_num_arg_columns_,
+        jac_var_columns_);
   }
 
   /**

@@ -201,3 +201,18 @@ TEST(dae_jacobian, wrong_size_throws) {
                std::invalid_argument);
   stan::math::recover_memory();
 }
+
+/** dae_jacobian_error: round-off for the right Jacobian, large otherwise. */
+TEST(dae_jacobian, dae_jacobian_error) {
+  Eigen::VectorXd yy(3), yp(3);
+  yy << 0.7, 0.2, 0.1;
+  yp << -0.03, 0.02, 0.01;
+  const std::vector<double> p{0.040, 1.0e4, 3.0e7};
+  EXPECT_LT(stan::math::dae_jacobian_error(chem_residual(), chem_jacobian(),
+                                           1.0, yy, yp, nullptr, p, x_r, x_i),
+            1e-14);
+  EXPECT_GT(stan::math::dae_jacobian_error(chem_residual(),
+                                           chem_state_only_jacobian(), 1.0, yy,
+                                           yp, nullptr, p, x_r, x_i),
+            0.1);
+}
