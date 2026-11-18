@@ -1,0 +1,19 @@
+Forward sensitivities, ode_rk45 (rtol = atol = 1e-6): one gradient [ms], speedups, coupled RHS per evaluation [us]
+model       N sens   AD[ms]  jac[ms] pushR[ms] pushT[ms] AD/jac AD/pushT jac/pushT rhsAD rhsJac rhsPushR rhsPushT dgrad
+pk2          3    5    0.079    0.041    0.073    0.062    1.9    1.3    0.7    0.32    0.16    0.27    0.21  4.2e-15
+pk2 +y0      3    8    0.087    0.045    0.080    0.068    1.9    1.3    0.7    0.21    0.13    0.19    0.15  4.2e-15
+idr          3    7    0.146    0.072    0.121    0.098    2.0    1.5    0.7    0.24    0.13    0.21    0.17  1.0e-15
+transit10   12    3    1.067    0.210    0.254    0.243    5.1    4.4    0.9    1.26    0.28    0.33    0.31  2.1e-15
+transit30   32    3    7.166    0.628    0.747    0.700   11.4   10.2    0.9   11.95    0.99    0.96    0.94  3.1e-15
+rd20        20    2    4.221    0.158    0.343    0.323   26.7   13.1    0.5   11.92    0.47    0.94    0.92  3.9e-15
+rd20 +y0    20   22    4.535    0.437    0.552    0.473   10.4    9.6    0.9   16.71    1.34    1.68    1.43  3.9e-15
+rd50        50    2   81.568    2.086    2.248    2.450   39.1   33.3    0.9   80.04    1.85    2.29    2.19  3.4e-10
+rd50 +y0    50   52  129.857   17.151    7.540    6.832    7.6   19.0    2.5  120.36   11.35    5.22    5.14  4.1e-09
+
+Adjoint backward step per evaluation [us]: J_y^T lambda and J_theta^T lambda
+model        N    P   AD-sweep  jacT*l    pull  AD/jac AD/pull jac/pull  diff(pull)
+pk2           3    5     0.12     0.06     0.02    2.0    6.0    3.0   4.3e-19
+idr           3    7     0.13     0.10     0.07    1.3    1.9    1.4   5.6e-17
+transit30    32    3     0.50     0.35     0.05    1.4   10.0    7.0   5.6e-17
+rd20         20    2     1.02     0.32     0.09    3.2   11.3    3.6   8.7e-16
+rd50         50    2     2.45     0.86     0.21    2.8   11.7    4.1   3.6e-15
