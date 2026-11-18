@@ -3,14 +3,14 @@
   "line": {
     "repo": "nsiccha/math",
     "ref": "dogfood",
-    "sha": "df0680214b6a04b6b9f2ba6f7377403b2e504add"
+    "sha": "4d8524e95e3d171a8cb59957a65ca4f8a6a9a259"
   },
   "upstream": {
     "repo": "stan-dev/math",
     "ref": "develop",
     "sha": "a1810b7792bb61ecdb93f511a19cafe6d52beda2"
   },
-  "prepared_at": "2026-11-18T14:29:02Z",
+  "prepared_at": "2026-11-18T19:46:03Z",
   "problems": [
     {
       "id": "dde-core",
@@ -195,7 +195,7 @@
     {
       "id": "torsten-integration",
       "role": "shared",
-      "title": "Torsten dosing and delay solvers on Stan Math v5.3.0",
+      "title": "Torsten dosing and delay solvers on Stan Math",
       "summary": "Feature. The embedded Torsten Math tree supplies the compartment models and pmx_solve_dde_rk45. The latter combines dosing schedules with the resumable Stan Math integrator.",
       "repairs": [],
       "upstream_refs": [],
@@ -240,8 +240,8 @@
         {
           "name": "Embedded Torsten Math revision",
           "repo": "nsiccha/torsten_math",
-          "sha": "1bc623ff036f896bf59867fefbc6e59733df29e4",
-          "why": "This revision has exactly the tree stored under stan/math/torsten."
+          "sha": "aa2b00e466fd180a1178dd0f67bc48495d7789c5",
+          "why": "The current Math subtree exactly matches this Torsten revision. The torsten-solver-jacobians record identifies the later import and its optional interfaces."
         },
         {
           "name": "Stan language signatures for the PMX DDE solver",
@@ -624,6 +624,90 @@
           "detail": "9 tests passed. Checks repeated transient dosing against steady state, analytical depot amounts and gradients."
         }
       ]
+    },
+    {
+      "id": "torsten-ode-functor-lifetime",
+      "role": "fix",
+      "title": "Torsten ODE models can lose the state of their right-hand side",
+      "summary": "The event model factory passes the right-hand side by value. The model's stream adaptor retained a reference to that local copy after the factory returned. The adaptor now owns its copy for the lifetime of the model.",
+      "repairs": [],
+      "upstream_refs": [],
+      "draft": {
+        "title": "ODE models should retain their right-hand-side functor after construction",
+        "prepared_at": "2026-11-18T19:46:03Z",
+        "body": "In Torsten Math develop at `bb8266ea`, the event model factory constructs a PKODEModel with its own by-value copy of the right-hand-side functor. The model stores an ode_rhs_ostream_adaptor whose functor member refers to that copy. When construction returns, the reference is dangling. Stateful C++ right-hand sides need their stored parameters to remain valid for every later evaluation during the solve.\n\nThe adaptor can own the functor by value. The [single-header fix](https://github.com/nsiccha/torsten_math/commit/94c7d7472379412df5a6dfe6badc20ae3c41113b) applies directly to that upstream revision. It can be taken independently of support for user-supplied Jacobians."
+      },
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "c6933875432974e32309f71c5088e9e1cf6769bd",
+            "title": "Merge commit for torsten_math develop aa2b00e466 into stan/math/torsten",
+            "original": [
+              "c6933875432974e32309f71c5088e9e1cf6769bd"
+            ]
+          }
+        ],
+        "why_together": "The Math merge imports the full Torsten tree. The native lifetime repair is one header change and applies independently of the new solver overloads."
+      },
+      "depends_on": [
+        "torsten-integration"
+      ],
+      "requires": [
+        {
+          "name": "Standalone Torsten lifetime fix",
+          "repo": "nsiccha/torsten_math",
+          "sha": "94c7d7472379412df5a6dfe6badc20ae3c41113b",
+          "why": "This is the isolated fix for the model adaptor. It applies cleanly to metrumresearchgroup/torsten_math develop at bb8266ea."
+        }
+      ],
+      "validation": []
+    },
+    {
+      "id": "torsten-solver-jacobians",
+      "role": "shared",
+      "title": "User-supplied Jacobians for Torsten dosing solvers",
+      "summary": "The C++ overloads of pmx_solve_rk45, pmx_solve_bdf, pmx_solve_adams and pmx_solve_dde_rk45 accept a Jacobian immediately after the right-hand side. It supplies the derivatives used for transient and steady-state sensitivities. The DDE form also takes derivatives with respect to each delayed state.",
+      "repairs": [],
+      "upstream_refs": [],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "c6933875432974e32309f71c5088e9e1cf6769bd",
+            "title": "Merge commit for torsten_math develop aa2b00e466 into stan/math/torsten",
+            "original": [
+              "c6933875432974e32309f71c5088e9e1cf6769bd"
+            ]
+          }
+        ],
+        "why_together": "The subtree merge imports all four overloads. In Torsten Math, the three ODE overloads share one implementation commit. The DDE overload follows it and uses the same functor pair and Jacobian checks."
+      },
+      "depends_on": [
+        "solver-jacobians",
+        "torsten-ode-functor-lifetime"
+      ],
+      "requires": [
+        {
+          "name": "ODE overloads and shared Jacobian support",
+          "repo": "nsiccha/torsten_math",
+          "sha": "6a2f3e35ed3e1dc96982f741f4bee144d6ae77af",
+          "why": "Provides RK45, BDF and Adams together with the helper used by the DDE solver."
+        },
+        {
+          "name": "DDE overload",
+          "repo": "nsiccha/torsten_math",
+          "sha": "ea7e614ef51dbdf74b40e9c998d97c4c830fe10d",
+          "why": "Adds the delayed-state terms and the DDE dosing interface on top of the shared Torsten implementation."
+        },
+        {
+          "name": "Stan language signatures",
+          "repo": "nsiccha/stanc3",
+          "sha": "c45c7621eb49138e674ef3f5b954ee63b2678518",
+          "why": "This compiler revision accepts all four two-function calling forms in Stan. C++ callers can use the headers directly."
+        }
+      ],
+      "validation": []
     }
   ]
 }
