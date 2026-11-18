@@ -37,6 +37,29 @@ namespace torsten {
     return PMXSolveODE<dsolve::PMXOdeIntegrator<dsolve::PMXVariadicOdeSystem, dsolve::PMXCvodesIntegrator<CV_ADAMS, CV_STAGGERED>>>::solve(f, nCmt, args...);
   }
 
+  /**
+   * Overload taking the Jacobian of the right hand side, used in place of
+   * nested autodiff in the forward sensitivity equations.
+   *
+   * @tparam F type of ODE system function.
+   * @tparam FJac type of its Jacobian.
+   * @param[in] f right hand side, f(t, y, theta, x_r, x_i, msgs).
+   * @param[in] jac Jacobian of f, taking f's arguments and returning the
+   *            nCmt x (nCmt + P) matrix [df/dy | df/dtheta | df/dx_r]:
+   *            P = size(theta) + size(x_r) for the parameter row and data
+   *            row of the current event. The x_r columns are never read.
+   * @param[in] nCmt number of compartments in model
+   * @param[in] args the remaining arguments of the overload without @c jac.
+   * @return a matrix with predicted amount in each compartment
+   *         at each event.
+   */
+  template <typename F, typename FJac, typename... Ts,
+            stan::require_not_arithmetic_t<FJac>* = nullptr>
+  auto pmx_solve_adams(const F& f, const FJac& jac, const int nCmt, const Ts&... args) {
+    const PMXJacobianPair<F, FJac> f_jac(f, jac);
+    return pmx_solve_adams(f_jac, nCmt, args...);
+  }
+
   /*
    * For backward compatibility we keep old version of
    * return type using transpose. This is less efficient and
