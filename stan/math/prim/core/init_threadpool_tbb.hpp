@@ -3,8 +3,6 @@
 
 #include <stan/math/prim/err/invalid_argument.hpp>
 
-#include <boost/lexical_cast.hpp>
-
 #ifndef TBB_INTERFACE_NEW
 #include <tbb/tbb_stddef.h>
 
@@ -20,7 +18,9 @@
 #include <tbb/task_scheduler_init.h>
 #endif
 
+#include <charconv>
 #include <cstdlib>
+#include <string_view>
 #include <thread>
 
 namespace stan {
@@ -44,33 +44,48 @@ namespace internal {
  * is invalid
  */
 inline int get_num_threads() {
-  int num_threads = 1;
 #ifdef STAN_THREADS
   const char* env_stan_num_threads = std::getenv("STAN_NUM_THREADS");
-  if (env_stan_num_threads != nullptr) {
-    try {
-      const int env_num_threads
-          = boost::lexical_cast<int>(env_stan_num_threads);
-      if (env_num_threads > 0) {
-        num_threads = env_num_threads;
-      } else if (env_num_threads == -1) {
-        num_threads = std::thread::hardware_concurrency();
-      } else {
-        invalid_argument("get_num_threads(int)", "STAN_NUM_THREADS",
-                         env_stan_num_threads,
-                         "The STAN_NUM_THREADS environment variable is '",
-                         "' but it must be positive or -1");
-      }
-    } catch (const boost::bad_lexical_cast&) {
-      invalid_argument("get_num_threads(int)", "STAN_NUM_THREADS",
-                       env_stan_num_threads,
-                       "The STAN_NUM_THREADS environment variable is '",
-                       "' but it must be a positive number or -1");
-    }
+  if (env_stan_num_threads == nullptr) {
+    return 1;
   }
+
+  const std::string_view value(env_stan_num_threads);
+  int num_threads;
+  const auto [end, error]
+      = std::from_chars(value.begin(), value.end(), num_threads);
+  if (error != std::errc() || end != value.end()
+      || (num_threads < 1 && num_threads != -1)) {
+    invalid_argument("get_num_threads(int)", "STAN_NUM_THREADS",
+                     env_stan_num_threads,
+                     "The STAN_NUM_THREADS environment variable is '",
+                     "' but it must be a positive number or -1");
+  }
+
+  return num_threads == -1 ? std::thread::hardware_concurrency() : num_threads;
+#else
+  return 1;
 #endif
-  return num_threads;
 }
+
+#ifdef TBB_INTERFACE_NEW
+/** Own the concurrency control before the arena, so the arena dies first. */
+struct threadpool_tbb_state {
+  tbb::global_control control;
+  tbb::task_arena arena;
+
+  explicit threadpool_tbb_state(int num_threads)
+      : control(tbb::global_control::max_allowed_parallelism, num_threads),
+        arena(num_threads, 1) {
+    arena.initialize();
+  }
+};
+
+/** Construct independently owned thread-pool state for an explicit count. */
+inline threadpool_tbb_state make_threadpool_tbb(int num_threads) {
+  return threadpool_tbb_state(num_threads);
+}
+#endif
 
 }  // namespace internal
 
@@ -87,13 +102,12 @@ inline int get_num_threads() {
  * of get_num_threads. The TBB scheduler will be activated by calling
  * this function.
  *
- * The function returns a reference to the static
- * tbb::global_control instance.
+ * The first call fixes the concurrency configuration for the process.
  *
  * @param n_threads The maximum number of threads available to the tbb. If not
  *  set will search for the environment variable `STAN_NUM_THREADS`. A value of
  *  -1 will assume all detectable threads are available for the process.
- * @return reference to the static tbb::global_control
+ * @return reference to the static tbb::task_arena
  * @throws std::runtime_error if n_threads (defaults to zero) is not provided
  * and the value of STAN_NUM_THREADS environment variable is invalid.
  */
@@ -112,12 +126,10 @@ inline tbb::task_arena& init_threadpool_tbb(int n_threads = 0) {
                      "' but it must be positive or -1");
   }
 #endif
-  static tbb::global_control tbb_gc(
-      tbb::global_control::max_allowed_parallelism, tbb_max_threads);
-  static tbb::task_arena tbb_arena(tbb_max_threads, 1);
-  tbb_arena.initialize();
+  static auto state = internal::make_threadpool_tbb(tbb_max_threads);
+  state.arena.initialize();
 
-  return tbb_arena;
+  return state.arena;
 }
 #else
 /**

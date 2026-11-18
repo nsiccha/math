@@ -3,13 +3,11 @@
 #include <stan/math/prim/fun/Eigen.hpp>
 #include <stan/math/mix/functor/laplace_likelihood.hpp>
 #include <stan/math/mix/functor/laplace_marginal_density_estimator.hpp>
-#include <stan/math/mix/functor/conditional_copy_and_promote.hpp>
-#include <stan/math/rev/meta.hpp>
-#include <stan/math/rev/core.hpp>
-#include <stan/math/rev/fun.hpp>
-#include <stan/math/rev/functor.hpp>
+#include <stan/math/prim/functor/conditional_copy_and_promote.hpp>
+#include <stan/math/mix/meta.hpp>
 #include <stan/math/prim/fun/to_ref.hpp>
 #include <stan/math/prim/functor/iter_tuple_nested.hpp>
+#include <stan/math/rev/functor/reverse_pass_collect_adjoints.hpp>
 #include <unsupported/Eigen/MatrixFunctions>
 #include <cmath>
 
@@ -135,40 +133,6 @@ inline constexpr void copy_compute_s2(Output&& output, Input&& input) {
       std::forward<Output>(output), std::forward<Input>(input));
 }
 
-/**
- * Collects adjoints from a tuple or std::vector of tuples
- * @tparam Output A tuple or std::vector of tuples where all scalar types are
- * `var` types
- * @tparam Input A tuple or std::vector of tuples where all scalar types are
- * `arithmetic` types
- * @param ret The vari object containing the adjoint to be added
- * @param output The output to which the adjoints will be added
- * @param input The input from which the adjoints will be collected
- */
-template <typename Output, typename Input>
-inline void reverse_pass_collect_adjoints(var ret, Output&& output,
-                                          Input&& input) {
-  if constexpr (is_tuple_v<Output>) {
-    stan::math::for_each(
-        [ret](auto&& inner_arg, auto&& inner_input) mutable {
-          reverse_pass_collect_adjoints(
-              ret, std::forward<decltype(inner_arg)>(inner_arg),
-              std::forward<decltype(inner_input)>(inner_input));
-        },
-        std::forward<Output>(output), std::forward<Input>(input));
-  } else if constexpr (is_std_vector_containing_tuple_v<Output>) {
-    for (std::size_t i = 0; i < output.size(); ++i) {
-      reverse_pass_collect_adjoints(ret, output[i], input[i]);
-    }
-  } else {
-    reverse_pass_callback(
-        [vi = ret.vi_, arg_arena = to_arena(std::forward<Output>(output)),
-         input_arena = to_arena(std::forward<Input>(input))]() mutable {
-          collect_adjoints(arg_arena, vi, input_arena);
-        });
-  }
-}
-
 }  // namespace internal
 
 /**
@@ -233,17 +197,13 @@ inline auto laplace_marginal_density(LLFun&& ll_fun, LLTupleArgs&& ll_args,
         ll_fun, ll_args_vals, covariance_val, options, msgs);
     auto ll_args_filter = internal::filter_var_scalar_types(ll_args_copy);
     // tuple of references to var types
-    // Solver 1, 2
-    const bool solver_1_or_2
-        = md_est.solver_used == 1 || md_est.solver_used == 2;
-    arena_t<Eigen::MatrixXd> R(md_est.theta.size() * solver_1_or_2,
-                               md_est.theta.size() * solver_1_or_2);
-    // Solver 3
-    arena_t<Eigen::MatrixXd> LU_solve_covariance(
-        covariance.rows() * (md_est.solver_used == 3),
-        covariance.cols() * (md_est.solver_used == 3));
+    const Eigen::Index theta_size = md_est.theta.size();
+    // Every solver writes R in place; no right-hand side below aliases it
+    arena_t<Eigen::MatrixXd> R(theta_size, theta_size);
+    // Solver 3 assigns it
+    arena_t<Eigen::MatrixXd> LU_solve_covariance;
     // Solver 1, 2, 3
-    arena_t<Eigen::VectorXd> s2(md_est.theta.size());
+    arena_t<Eigen::VectorXd> s2(theta_size);
     using stan::math::internal::ZeroOut;
     if (md_est.solver_used == 1) {
       if (options.hessian_block_size == 1) {
@@ -283,13 +243,14 @@ inline auto laplace_marginal_density(LLFun&& ll_fun, LLTupleArgs&& ll_args,
         internal::copy_compute_s2<ZeroOut>(partial_parm, ll_args_filter);
       }
     } else if (md_est.solver_used == 2) {
-      R = md_est.W_r
-          - md_est.W_r * md_est.K_root
-                * md_est.L.transpose()
-                      .template triangularView<Eigen::Upper>()
-                      .solve(
-                          md_est.L.template triangularView<Eigen::Lower>()
-                              .solve(md_est.K_root.transpose() * md_est.W_r));
+      R.deep_copy(md_est.W_r);
+      R.noalias()
+          -= md_est.W_r * md_est.K_root
+             * md_est.L.transpose()
+                   .template triangularView<Eigen::Upper>()
+                   .solve(
+                       md_est.L.template triangularView<Eigen::Lower>().solve(
+                           md_est.K_root.transpose() * md_est.W_r));
 
       arena_t<Eigen::MatrixXd> C
           = md_est.L.template triangularView<Eigen::Lower>().solve(
@@ -304,7 +265,7 @@ inline auto laplace_marginal_density(LLFun&& ll_fun, LLTupleArgs&& ll_args,
       auto I_minus_BinvKW
           = Eigen::MatrixXd::Identity(md_est.W_r.rows(), md_est.W_r.cols())
             - LU_solve_covariance * md_est.W_r;
-      R = md_est.W_r * I_minus_BinvKW;  // == W - W B^{-1} K W
+      R.noalias() = md_est.W_r * I_minus_BinvKW;  // == W - W B^{-1} K W
       arena_t<Eigen::MatrixXd> A
           = covariance_val - covariance_val * md_est.W_r * LU_solve_covariance;
       auto s2_tmp = laplace_likelihood::compute_s2(ll_fun, md_est.theta, A,

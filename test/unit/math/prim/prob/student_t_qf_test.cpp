@@ -6,8 +6,7 @@
 TEST(MathFunctions, student_t_qf_vals) {
   using stan::math::student_t_qf;
 
-  Eigen::VectorXd p(5);
-  p << 0.1, 0.2, 0.5, 0.8, 0.9;
+  Eigen::VectorXd p{{0.1, 0.2, 0.5, 0.8, 0.9}};
 
   Eigen::VectorXd res = student_t_qf(p, 4, 2, 3);
 
@@ -21,11 +20,9 @@ TEST(MathFunctions, student_t_qf_vals) {
 TEST(MathFunctions, student_t_qf_vec) {
   using stan::math::student_t_qf;
 
-  Eigen::VectorXd p(5);
-  p << 0.1, 0.2, 0.5, 0.8, 0.9;
+  Eigen::VectorXd p{{0.1, 0.2, 0.5, 0.8, 0.9}};
 
-  Eigen::VectorXd nu(5);
-  nu << 4, 4, 3, 3, 3;
+  Eigen::VectorXd nu{{4, 4, 3, 3, 3}};
 
   Eigen::VectorXd res(5);
   for (int i = 0; i < 5; ++i) {
@@ -37,12 +34,11 @@ TEST(MathFunctions, student_t_qf_vec) {
   Eigen::RowVectorXd nu_rowvec = nu.transpose();
   Eigen::RowVectorXd res_rowvec = res.transpose();
 
-  EXPECT_MATRIX_FLOAT_EQ(res_rowvec, student_t_qf(p_rowvec, nu_rowvec, 2, 3));
+  EXPECT_MATRIX_FLOAT_EQ(res, student_t_qf(p_rowvec, nu_rowvec, 2, 3));
 }
 
 TEST(MathFunctions, student_t_qf_inf) {
   using stan::math::student_t_qf;
-  long double log_p = std::numeric_limits<long double>::min();
   const double inf = std::numeric_limits<double>::infinity();
   EXPECT_EQ(student_t_qf(0, 2, 0, 1), -inf);
   EXPECT_EQ(student_t_qf(1, 2, 0, 1), inf);

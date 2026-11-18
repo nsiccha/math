@@ -3,12 +3,15 @@
 
 #include <stan/math/mix/functor/laplace_likelihood.hpp>
 #include <stan/math/mix/functor/laplace_marginal_density.hpp>
+#include <stan/math/mix/meta.hpp>
 #include <stan/math/rev/fun/dot_product.hpp>
 #include <stan/math/rev/fun/exp.hpp>
-#include <stan/math/rev/fun/lgamma.hpp>
-#include <stan/math/rev/fun/sum.hpp>
 #include <stan/math/fwd/fun/exp.hpp>
+#include <stan/math/rev/fun/sum.hpp>
+#include <stan/math/fwd/fun/sum.hpp>
 #include <stan/math/fwd/fun/lgamma.hpp>
+#include <stan/math/rev/fun/lgamma.hpp>
+#include <stan/math/prim/fun/add.hpp>
 
 namespace stan {
 namespace math {
@@ -36,15 +39,16 @@ struct poisson_log_likelihood {
     Eigen::VectorXd counts_per_group = Eigen::VectorXd::Zero(theta.size());
     Eigen::VectorXd n_per_group = Eigen::VectorXd::Zero(theta.size());
 
-    for (int i = 0; i < theta.size(); i++) {
+    double norm_constant = 0;
+    for (size_t i = 0; i < y_index.size(); i++) {
       counts_per_group(y_index[i] - 1) += y[i];
       n_per_group(y_index[i] - 1) += 1;
+      norm_constant -= lgamma(y[i] + 1.0);
     }
 
     auto theta_offset = to_ref(add(theta, mean));
 
-    return -sum(lgamma(add(counts_per_group, 1)))
-           + dot_product(theta_offset, counts_per_group)
+    return norm_constant + dot_product(theta_offset, counts_per_group)
            - dot_product(n_per_group, exp(theta_offset));
   }
 };

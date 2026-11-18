@@ -83,6 +83,7 @@
 #include <stan/math/prim/fun/elt_multiply.hpp>
 #include <stan/math/prim/fun/erf.hpp>
 #include <stan/math/prim/fun/erfc.hpp>
+#include <stan/math/prim/fun/erfcx.hpp>
 #include <stan/math/prim/fun/eval.hpp>
 #include <stan/math/prim/fun/exp.hpp>
 #include <stan/math/prim/fun/exp2.hpp>
@@ -175,6 +176,7 @@
 #include <stan/math/prim/fun/log1p.hpp>
 #include <stan/math/prim/fun/log1p_exp.hpp>
 #include <stan/math/prim/fun/log2.hpp>
+#include <stan/math/prim/fun/log_cosh.hpp>
 #include <stan/math/prim/fun/log_determinant.hpp>
 #include <stan/math/prim/fun/log_determinant_ldlt.hpp>
 #include <stan/math/prim/fun/log_determinant_spd.hpp>
@@ -283,6 +285,7 @@
 #include <stan/math/prim/fun/scalar_seq_view.hpp>
 #include <stan/math/prim/fun/scaled_add.hpp>
 #include <stan/math/prim/fun/sd.hpp>
+#include <stan/math/prim/fun/sech.hpp>
 #include <stan/math/prim/fun/segment.hpp>
 #include <stan/math/prim/fun/serializer.hpp>
 #include <stan/math/prim/fun/select.hpp>
@@ -295,6 +298,7 @@
 #include <stan/math/prim/fun/size_mvt.hpp>
 #include <stan/math/prim/fun/size_zero.hpp>
 #include <stan/math/prim/fun/softmax.hpp>
+#include <stan/math/prim/fun/solve_sylvester.hpp>
 #include <stan/math/prim/fun/sort_asc.hpp>
 #include <stan/math/prim/fun/sort_desc.hpp>
 #include <stan/math/prim/fun/sort_indices.hpp>
@@ -326,7 +330,9 @@
 #include <stan/math/prim/fun/to_matrix.hpp>
 #include <stan/math/prim/fun/to_ref.hpp>
 #include <stan/math/prim/fun/to_row_vector.hpp>
+#include <stan/math/prim/fun/to_row_vector_array.hpp>
 #include <stan/math/prim/fun/to_vector.hpp>
+#include <stan/math/prim/fun/to_vector_array.hpp>
 #include <stan/math/prim/fun/trace.hpp>
 #include <stan/math/prim/fun/trace_dot.hpp>
 #include <stan/math/prim/fun/trace_gen_inv_quad_form_ldlt.hpp>
@@ -350,5 +356,6 @@
 #include <stan/math/prim/fun/zeros_int_array.hpp>
 #include <stan/math/prim/fun/zeros_row_vector.hpp>
 #include <stan/math/prim/fun/zeros_vector.hpp>
+#include <stan/math/prim/fun/zip_index.hpp>
 
 #endif

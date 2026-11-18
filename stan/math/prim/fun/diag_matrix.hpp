@@ -18,7 +18,7 @@ namespace math {
  */
 template <typename EigVec, require_eigen_vector_t<EigVec>* = nullptr>
 inline Eigen::Matrix<value_type_t<EigVec>, Eigen::Dynamic, Eigen::Dynamic>
-diag_matrix(const EigVec& v) {
+diag_matrix(EigVec&& v) {
   return v.asDiagonal();
 }
 

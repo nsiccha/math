@@ -79,6 +79,7 @@ special_arg_values = {
     "corr_matrix_constrain": [None, 2],
     "corr_matrix_free": [1],
     "cov_matrix_constrain": [None, 1],
+    "cholesky_corr_free": [1.0],
     "cholesky_decompose": [pos_definite, None],
     "cholesky_corr_constrain": [None, 2],
     "cholesky_factor_constrain": [None, 1, 1],
@@ -161,7 +162,6 @@ ignored = [
 # these are all slight renames compared to stan math
 renames = {
     "lchoose": "binomial_coefficient_log",
-    "lmultiply": "multiply_log",
     "cholesky_factor_corr_constrain": "cholesky_corr_constrain",
     "cholesky_factor_corr_unconstrain": "cholesky_corr_free",
     "cholesky_factor_cov_constrain": "cholesky_factor_constrain",
