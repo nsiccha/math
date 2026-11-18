@@ -3,14 +3,14 @@
   "line": {
     "repo": "nsiccha/math",
     "ref": "dogfood",
-    "sha": "5ee1551154db14debb2c137663fcdfd6fe800c87"
+    "sha": "df0680214b6a04b6b9f2ba6f7377403b2e504add"
   },
   "upstream": {
     "repo": "stan-dev/math",
-    "ref": "v5.3.0",
-    "sha": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f"
+    "ref": "develop",
+    "sha": "a1810b7792bb61ecdb93f511a19cafe6d52beda2"
   },
-  "prepared_at": "2026-11-18T12:01:01Z",
+  "prepared_at": "2026-11-18T14:29:02Z",
   "problems": [
     {
       "id": "dde-core",
@@ -73,6 +73,15 @@
           ],
           "result": "passed",
           "detail": "4 tests passed. Exercises reverse-mode derivatives across resumable integration."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "test/unit/math/rev/functor/dde_rk45_rev_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "12 tests passed. Checks derivatives with respect to initial state, delays and parameters."
         }
       ]
     },
@@ -80,7 +89,7 @@
       "id": "solver-jacobians",
       "role": "shared",
       "title": "User-supplied Jacobians for ODE, DAE and DDE solvers",
-      "summary": "Feature. C++ callers can provide derivatives to the solvers and check them against autodiff. Stan Math issue #1061 describes the ODE use case.",
+      "summary": "Feature. C++ callers can provide derivatives to the solvers and check them against autodiff. Stan Math issue #1061 describes the ODE use case. The ode_jacobian benchmark directory records the comparison of forward and adjoint derivative implementations.",
       "repairs": [],
       "upstream_refs": [
         {
@@ -153,6 +162,33 @@
           ],
           "result": "passed",
           "detail": "12 tests passed. Covers the ODE and DAE overloads, the adjoint solver and the Jacobian checking functions."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "test/unit/math/rev/functor/ode_jacobian_cvodes_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "6 tests passed. Compares solver values and derivatives for ARKODE RK45 and Cash–Karp, Adams, BDF and adjoint interfaces."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "test/unit/math/rev/functor/jacobian_dae_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "4 tests passed. Exercises the DAE residual Jacobian."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "test/unit/math/rev/functor/dde_jacobian_rev_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "4 tests passed. Compares the DDE Jacobian interface with autodiff."
         }
       ]
     },
@@ -186,9 +222,16 @@
             "original": [
               "51f049d3ca129f48aec0ba71431a043aacdbbcbe"
             ]
+          },
+          {
+            "sha": "a7a77b5db4c6e29efba76c14ec1f66933dd20e31",
+            "title": "Pull nsiccha/torsten_math develop 1bc623f into the Torsten subtree",
+            "original": [
+              "a7a77b5db4c6e29efba76c14ec1f66933dd20e31"
+            ]
           }
         ],
-        "why_together": "The first subtree import and the build and include hooks expose Torsten in Math. The later subtree pull brings in the dosing DDE solver and the compartment repairs."
+        "why_together": "The initial import and build hooks expose Torsten in Math. The first update brings in the dosing DDE solver and analytical compartment fixes. The second updates the dosing schedule and coupled solver. Math develop now supplies the shared ARKODE build rules."
       },
       "depends_on": [
         "dde-core"
@@ -197,7 +240,7 @@
         {
           "name": "Embedded Torsten Math revision",
           "repo": "nsiccha/torsten_math",
-          "sha": "d884ec18406a8ce8181a4bddf4f040456db3001a",
+          "sha": "1bc623ff036f896bf59867fefbc6e59733df29e4",
           "why": "This revision has exactly the tree stored under stan/math/torsten."
         },
         {
@@ -216,6 +259,24 @@
           ],
           "result": "passed",
           "detail": "12 tests passed. Exercises the integration between Torsten dosing events and the Math delay solver."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true; BridgeStan 2.9.0 and a Torsten-capable stanc3",
+          "tests": [
+            "BridgeStan lagged-decay model with a bolus at t=0, both pmx_solve_dde_rk45 calling forms"
+          ],
+          "result": "passed",
+          "detail": "At eight observation times, the amount and its reverse-mode derivatives with respect to the decay coefficient and the delay matched the exact method-of-steps solution. The largest absolute discrepancy was 3.33e-16 for either calling form."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_solve_dde_rk45_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "12 tests passed. Exercises dosing events, DDE continuation, and derivatives."
         }
       ]
     },
@@ -262,6 +323,15 @@
           ],
           "result": "passed",
           "detail": "10 tests passed. Includes exact limiting values, gradients and steady state."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_onecpt_equal_rates_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "10 tests passed. Includes values and derivatives at equal rates."
         }
       ]
     },
@@ -316,6 +386,15 @@
           ],
           "result": "passed",
           "detail": "8 tests passed. Includes the transient and steady-state compartment amounts and their gradients against independent references."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_cpt_equal_rates_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "8 tests passed. Exercises transient and steady-state analytical compartments and gradients."
         }
       ]
     },
@@ -370,6 +449,179 @@
           ],
           "result": "passed",
           "detail": "8 tests passed. Includes the transient and steady-state compartment amounts and their gradients against independent references."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_cpt_equal_rates_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "8 tests passed. Exercises transient and steady-state analytical compartments and gradients."
+        }
+      ]
+    },
+    {
+      "id": "coupled-event-time-gradients",
+      "role": "fix",
+      "title": "Lagged doses give incorrect gradients in coupled PK/PD solvers",
+      "summary": "The coupled PK/PD solver loses the contribution of the start time when differentiating the step following a lagged dose. The amount can be correct while its lag derivative is wrong.",
+      "repairs": [],
+      "upstream_refs": [],
+      "draft": {
+        "title": "A lagged dose gives a spurious derivative in a constant-slope PD compartment",
+        "prepared_at": "2026-11-18T14:29:02Z",
+        "body": "In Torsten Math develop at `bb8266ea`, call `pmx_solve_onecpt_rk45` with one extra PD state. Give the extra state initial value zero and an autonomous right-hand side returning the length-one vector `[1]`, independent of PK and parameters. Use θ = [10, 80, 1.2], unit bioavailability for all three compartments and compartment lags [L, 0, 0], with L a reverse-mode variable initialized to 0.35. Give a single 100-unit depot bolus at time 0, then observe at time 1. Use no infusion, repeat or steady-state initialization.\n\nDifferentiate the PD amount `y(2, 1)` with respect to L. Its value is 1 and Torsten returns a derivative of 1. For any L strictly between 0 and 1 the solution is L + (1 − L) = 1. Its derivative must be zero, including at L = 0.35. This example places the observation away from the event.\n\nPreserving the derivative of the interval length across the event restores the cancellation. The same coupled step is used in the one- and two-compartment RK45 and BDF solvers. The [native reproducer and isolated patch results](https://github.com/nsiccha/torsten_math/blob/5726aad1124698cd2e2343bd47c1258a6d138043/dogfood-index.json) include the full C++ call."
+      },
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "a7a77b5db4c6e29efba76c14ec1f66933dd20e31",
+            "title": "Pull nsiccha/torsten_math develop 1bc623f into the Torsten subtree",
+            "original": [
+              "a7a77b5db4c6e29efba76c14ec1f66933dd20e31"
+            ]
+          }
+        ],
+        "why_together": "In Stan Math the subtree update is a single merge. Use its first-parent diff to see the imported changes. The independently usable native patch consists of pmx_coupled_model.hpp and the lag regression in test/unit/coupled_twocpt_typed_test.cpp."
+      },
+      "depends_on": [],
+      "requires": [
+        {
+          "name": "Torsten coupled ODE interval sensitivity",
+          "repo": "nsiccha/torsten_math",
+          "sha": "7887d98d9e8f65cceea75e645dfdcfb54fe2cfb8",
+          "why": "The coupled model and its typed lag regression apply directly to Torsten Math develop at bb8266ea. They preserve sensitivities to a moving event time."
+        }
+      ],
+      "validation": [
+        {
+          "base": "bb8266ea6bf2eebdc56e1ba82be230e3b4d70a9a",
+          "native_build": "GCC 15.2.0, C++17, -O1, nsiccha/math at 085aaf9585167c60f331a44771e6fe465ab39d50",
+          "tests": [
+            "Native Torsten reproducer in linked evidence"
+          ],
+          "result": "failed",
+          "detail": "Upstream bb8266ea gave response 1 and lag derivative 1.",
+          "evidence": "https://github.com/nsiccha/torsten_math/blob/5726aad1124698cd2e2343bd47c1258a6d138043/dogfood-index.json"
+        },
+        {
+          "base": "bb8266ea6bf2eebdc56e1ba82be230e3b4d70a9a",
+          "native_build": "GCC 15.2.0, C++17, -O1, nsiccha/math at 085aaf9585167c60f331a44771e6fe465ab39d50",
+          "tests": [
+            "test/unit/coupled_twocpt_typed_test.cpp",
+            "Native Torsten reproducer in linked evidence"
+          ],
+          "result": "passed",
+          "detail": "At 1bc623ff03, all 80 typed tests passed. The constant-slope example gave response 1 and lag derivative 0.",
+          "evidence": "https://github.com/nsiccha/torsten_math/blob/5726aad1124698cd2e2343bd47c1258a6d138043/dogfood-index.json"
+        },
+        {
+          "base": "bb8266ea6bf2eebdc56e1ba82be230e3b4d70a9a",
+          "native_build": "GCC 15.2.0, C++17, -O1, nsiccha/math at 085aaf9585167c60f331a44771e6fe465ab39d50",
+          "tests": [
+            "test/unit/coupled_twocpt_typed_test.cpp",
+            "Native Torsten reproducer in linked evidence"
+          ],
+          "result": "passed",
+          "detail": "On upstream bb8266ea with just pmx_coupled_model.hpp and its lag regression, the reproducer printed 1 0 and all 80 coupled-solver tests passed.",
+          "evidence": "https://github.com/nsiccha/torsten_math/blob/5726aad1124698cd2e2343bd47c1258a6d138043/dogfood-index.json"
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/coupled_twocpt_typed_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "80 tests passed. Includes autodiff comparisons across lagged doses for the coupled RK45 and BDF solvers."
+        }
+      ]
+    },
+    {
+      "id": "infusion-bioavailability",
+      "role": "fix",
+      "title": "Repeated RATE-defined infusions disagree with steady-state initialization",
+      "summary": "When bioavailability differs from one, the transient schedule scales the rate and keeps its original duration. The steady-state solver keeps the rate and changes the duration. The two schedules agree on total dose but give different compartment amounts.",
+      "repairs": [],
+      "upstream_refs": [],
+      "draft": {
+        "title": "RATE-defined dosing with fractional bioavailability gives two periodic solutions",
+        "prepared_at": "2026-11-18T14:29:02Z",
+        "body": "In Torsten Math develop at `bb8266ea`, use `pmx_solve_onecpt` with CL = 10, V = 80 and ka = 1.2. Give 1200 units into the depot at 150 units/hour every 12 hours. Set depot bioavailability to 0.8 and all lags to zero. Compare the depot amount at the start of a dose under two schedules: initialize it with `ss = 1` at time 0, or initialize empty at −600 hours and repeat the same dose up to time 0. Read the amount at time 0 after that dose has started.\n\nSteady-state initialization gives 0.150748. Repeated transient dosing gives 0.822919. With 960 units absorbed, the specified rate of 150 should last 6.4 hours. For duration d = 6.4, the expected periodic trough is (150/ka) × (1 − exp(−ka·d)) × exp(−ka·(12−d)) / (1 − exp(−ka·12)) = 0.150748. The transient solver spreads the 960 units over 8 hours instead.\n\nUsing the effective amount to schedule the infusion end also makes this event depend on bioavailability when computing gradients. The [native reproducer and isolated patch results](https://github.com/nsiccha/torsten_math/blob/5726aad1124698cd2e2343bd47c1258a6d138043/dogfood-index.json) give the two schedules in C++."
+      },
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "a7a77b5db4c6e29efba76c14ec1f66933dd20e31",
+            "title": "Pull nsiccha/torsten_math develop 1bc623f into the Torsten subtree",
+            "original": [
+              "a7a77b5db4c6e29efba76c14ec1f66933dd20e31"
+            ]
+          }
+        ],
+        "why_together": "In Stan Math the subtree update is a single merge. Use its first-parent diff to see the imported changes. The native schedule fix is sufficient for analytical compartment models. The coupled-step patch is needed for the full repair when differentiating a coupled ODE through the shifted infusion end."
+      },
+      "depends_on": [
+        "coupled-event-time-gradients"
+      ],
+      "requires": [
+        {
+          "name": "Torsten infusion scheduling",
+          "repo": "nsiccha/torsten_math",
+          "sha": "0c29a8eae200c528e9bb01ae62432211e0e7ecbc",
+          "why": "For the scheduling change alone, apply ev_history.hpp, ev_manager.hpp, ev_solver.hpp and their events and steady-state infusion regression files. The full native commit also updates DDE burn-in."
+        },
+        {
+          "name": "Torsten coupled ODE interval sensitivity",
+          "repo": "nsiccha/torsten_math",
+          "sha": "7887d98d9e8f65cceea75e645dfdcfb54fe2cfb8",
+          "why": "The coupled model and its typed lag regression apply directly to Torsten Math develop at bb8266ea. They preserve sensitivities to a moving event time."
+        }
+      ],
+      "validation": [
+        {
+          "base": "bb8266ea6bf2eebdc56e1ba82be230e3b4d70a9a",
+          "native_build": "GCC 15.2.0, C++17, -O1, nsiccha/math at 085aaf9585167c60f331a44771e6fe465ab39d50",
+          "tests": [
+            "Native Torsten reproducer in linked evidence"
+          ],
+          "result": "failed",
+          "detail": "Upstream bb8266ea printed 0.150748 at steady state and 0.822919 after repeated dosing.",
+          "evidence": "https://github.com/nsiccha/torsten_math/blob/5726aad1124698cd2e2343bd47c1258a6d138043/dogfood-index.json"
+        },
+        {
+          "base": "bb8266ea6bf2eebdc56e1ba82be230e3b4d70a9a",
+          "native_build": "GCC 15.2.0, C++17, -O1, nsiccha/math at 085aaf9585167c60f331a44771e6fe465ab39d50",
+          "tests": [
+            "test/unit/pmx_ss_biovar_infusion_test.cpp",
+            "Native Torsten reproducer in linked evidence"
+          ],
+          "result": "passed",
+          "detail": "At 1bc623ff03 the reproducer printed 0.150748 twice and all 9 regression tests passed.",
+          "evidence": "https://github.com/nsiccha/torsten_math/blob/5726aad1124698cd2e2343bd47c1258a6d138043/dogfood-index.json"
+        },
+        {
+          "base": "bb8266ea6bf2eebdc56e1ba82be230e3b4d70a9a",
+          "native_build": "GCC 15.2.0, C++17, -O1, nsiccha/math at 085aaf9585167c60f331a44771e6fe465ab39d50",
+          "tests": [
+            "test/unit/pmx_ss_biovar_infusion_test.cpp",
+            "Native Torsten reproducer in linked evidence"
+          ],
+          "result": "passed",
+          "detail": "On upstream bb8266ea with just the five-file scheduling patch, the reproducer printed 0.150748 twice and the 9 infusion regression tests passed.",
+          "evidence": "https://github.com/nsiccha/torsten_math/blob/5726aad1124698cd2e2343bd47c1258a6d138043/dogfood-index.json"
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math df0680214b6a04b6b9f2ba6f7377403b2e504add, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_ss_biovar_infusion_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "9 tests passed. Checks repeated transient dosing against steady state, analytical depot amounts and gradients."
         }
       ]
     }
