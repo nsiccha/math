@@ -1,0 +1,377 @@
+{
+  "schema": 1,
+  "line": {
+    "repo": "nsiccha/math",
+    "ref": "dogfood",
+    "sha": "5ee1551154db14debb2c137663fcdfd6fe800c87"
+  },
+  "upstream": {
+    "repo": "stan-dev/math",
+    "ref": "v5.3.0",
+    "sha": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f"
+  },
+  "prepared_at": "2026-11-18T12:01:01Z",
+  "problems": [
+    {
+      "id": "dde-core",
+      "role": "shared",
+      "title": "Constant-delay differential equations in Stan Math",
+      "summary": "Feature. The C++ functions dde_rk45 and dde_rk45_tol integrate a system with constant delays and propagate sensitivities. Torsten uses the same integrator to resume after dosing events.",
+      "repairs": [],
+      "upstream_refs": [],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "c08f9b51860750240f138cdaab2d99ef1f4f017e",
+            "title": "Add dde_rk45 and dde_rk45_tol: constant-delay DDE solver adapted from RETARD",
+            "original": [
+              "c08f9b51860750240f138cdaab2d99ef1f4f017e"
+            ]
+          },
+          {
+            "sha": "4960a97515f7b1bb6f45de626f9547f64b7f494b",
+            "title": "Make the DDE core a resumable integrator with jumps and jump conditions",
+            "original": [
+              "4960a97515f7b1bb6f45de626f9547f64b7f494b"
+            ]
+          },
+          {
+            "sha": "608713f07421965e0e0176d634f7c01135321e7a",
+            "title": "Add derivative() to the resumable DDE integrator",
+            "original": [
+              "608713f07421965e0e0176d634f7c01135321e7a"
+            ]
+          }
+        ],
+        "why_together": "The first commit adds the solver. The next two expose resumable state and the derivative at the current stop, which the Torsten event solver needs."
+      },
+      "depends_on": [],
+      "requires": [
+        {
+          "name": "Stan language signatures",
+          "repo": "nsiccha/stanc3",
+          "sha": "001b7a0ec6ef3fb2269df4db36c59e10ec628df0",
+          "why": "Required when compiling a Stan model that calls dde_rk45 or dde_rk45_tol. C++ callers use the Math headers directly."
+        }
+      ],
+      "validation": [
+        {
+          "base": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f",
+          "native_build": "Stan Math 5ee1551154db14debb2c137663fcdfd6fe800c87 with GCC 15.2.0, C++17, -O1",
+          "tests": [
+            "test/unit/math/rev/functor/dde_rk45_rev_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "11 tests passed. Covers sensitivities to initial state, parameters and delays."
+        },
+        {
+          "base": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f",
+          "native_build": "Stan Math 5ee1551154db14debb2c137663fcdfd6fe800c87 with GCC 15.2.0, C++17, -O1",
+          "tests": [
+            "test/unit/math/rev/functor/dde_retard_integrator_rev_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "4 tests passed. Exercises reverse-mode derivatives across resumable integration."
+        }
+      ]
+    },
+    {
+      "id": "solver-jacobians",
+      "role": "shared",
+      "title": "User-supplied Jacobians for ODE, DAE and DDE solvers",
+      "summary": "Feature. C++ callers can provide derivatives to the solvers and check them against autodiff. Stan Math issue #1061 describes the ODE use case.",
+      "repairs": [],
+      "upstream_refs": [
+        {
+          "url": "https://github.com/stan-dev/math/issues/1061",
+          "relation": "related"
+        }
+      ],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "046bba2c63a47e7804e0994f5568be3e836b6b88",
+            "title": "Prototype ODE solvers taking a user Jacobian; benchmark against nested AD",
+            "original": [
+              "046bba2c63a47e7804e0994f5568be3e836b6b88"
+            ]
+          },
+          {
+            "sha": "2efb697aba43c53a2a4d816424be167f1e343501",
+            "title": "Jacobian overloads for every ODE solver, adjoint included; tests vs AD",
+            "original": [
+              "2efb697aba43c53a2a4d816424be167f1e343501"
+            ]
+          },
+          {
+            "sha": "bb3a1e7e70d4952beea25b1b64f734a84675fec8",
+            "title": "dae/dae_tol overloads taking a residual Jacobian",
+            "original": [
+              "bb3a1e7e70d4952beea25b1b64f734a84675fec8"
+            ]
+          },
+          {
+            "sha": "94e7c974444ef0389b4b934e1cff649eff9a8cc5",
+            "title": "dde_rk45/dde_rk45_tol overloads taking a Jacobian",
+            "original": [
+              "94e7c974444ef0389b4b934e1cff649eff9a8cc5"
+            ]
+          },
+          {
+            "sha": "d61142f48acb4b9a1af9db862ba7df001204b9ee",
+            "title": "Check user Jacobians against autodiff: debug flag and Stan-callable checks",
+            "original": [
+              "d61142f48acb4b9a1af9db862ba7df001204b9ee"
+            ]
+          }
+        ],
+        "why_together": "The ODE overload introduces the shared Jacobian adapter. The remaining commits extend it to the other solver families and add derivative checks. Only the DDE overload requires the delay solver."
+      },
+      "depends_on": [
+        "dde-core"
+      ],
+      "requires": [],
+      "validation": [
+        {
+          "base": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f",
+          "native_build": "Stan Math 5ee1551154db14debb2c137663fcdfd6fe800c87 with GCC 15.2.0, C++17, -O1",
+          "tests": [
+            "test/unit/math/rev/functor/dde_jacobian_rev_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "4 tests passed, including direct comparisons with autodiff and checks for incorrect Jacobian dimensions."
+        },
+        {
+          "base": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f",
+          "native_build": "Stan Math 5ee1551154db14debb2c137663fcdfd6fe800c87 with GCC 15.2.0, C++17, -O1",
+          "tests": [
+            "test/unit/math/rev/functor/ode_jacobian_cvodes_test.cpp",
+            "test/unit/math/rev/functor/jacobian_dae_test.cpp",
+            "test/unit/math/rev/functor/ode_jacobian_check_cvodes_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "12 tests passed. Covers the ODE and DAE overloads, the adjoint solver and the Jacobian checking functions."
+        }
+      ]
+    },
+    {
+      "id": "torsten-integration",
+      "role": "shared",
+      "title": "Torsten dosing and delay solvers on Stan Math v5.3.0",
+      "summary": "Feature. The embedded Torsten Math tree supplies the compartment models and pmx_solve_dde_rk45. The latter combines dosing schedules with the resumable Stan Math integrator.",
+      "repairs": [],
+      "upstream_refs": [],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "edcbe6adb1d559fd8e03ceff02633723f88e5183",
+            "title": "Add Torsten (nsiccha/torsten_math develop) as a subtree at stan/math/torsten",
+            "original": [
+              "edcbe6adb1d559fd8e03ceff02633723f88e5183"
+            ]
+          },
+          {
+            "sha": "2709dff0079eba57587463c081ece8bdcb9c3c6f",
+            "title": "Add Metrum's Torsten hooks: stan/math.hpp include, make files, ARKODE rules",
+            "original": [
+              "2709dff0079eba57587463c081ece8bdcb9c3c6f"
+            ]
+          },
+          {
+            "sha": "51f049d3ca129f48aec0ba71431a043aacdbbcbe",
+            "title": "Pull nsiccha/torsten_math develop d884ec18 into the Torsten subtree",
+            "original": [
+              "51f049d3ca129f48aec0ba71431a043aacdbbcbe"
+            ]
+          }
+        ],
+        "why_together": "The first subtree import and the build and include hooks expose Torsten in Math. The later subtree pull brings in the dosing DDE solver and the compartment repairs."
+      },
+      "depends_on": [
+        "dde-core"
+      ],
+      "requires": [
+        {
+          "name": "Embedded Torsten Math revision",
+          "repo": "nsiccha/torsten_math",
+          "sha": "d884ec18406a8ce8181a4bddf4f040456db3001a",
+          "why": "This revision has exactly the tree stored under stan/math/torsten."
+        },
+        {
+          "name": "Stan language signatures for the PMX DDE solver",
+          "repo": "nsiccha/stanc3",
+          "sha": "cb8f48aca7ea216a4b9ec0bfc776ce0b750a04a6",
+          "why": "Use the Torsten-capable compiler when calling pmx_solve_dde_rk45 from Stan."
+        }
+      ],
+      "validation": [
+        {
+          "base": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f",
+          "native_build": "Stan Math 5ee1551154db14debb2c137663fcdfd6fe800c87 with GCC 15.2.0, C++17, -O1",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_solve_dde_rk45_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "12 tests passed. Exercises the integration between Torsten dosing events and the Math delay solver."
+        }
+      ]
+    },
+    {
+      "id": "onecpt-equal-rates",
+      "role": "fix",
+      "title": "One-compartment amounts and gradients become NaN when ka equals CL/V",
+      "summary": "For a depot bolus, the central amount has the finite limit A × ka × t × exp(−ka × t). Dividing by ka − CL/V gives NaN at equality and loses precision nearby.",
+      "repairs": [],
+      "upstream_refs": [
+        {
+          "url": "https://github.com/metrumresearchgroup/torsten_math/pull/3",
+          "relation": "fixes"
+        }
+      ],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "51f049d3ca129f48aec0ba71431a043aacdbbcbe",
+            "title": "Pull nsiccha/torsten_math develop d884ec18 into the Torsten subtree",
+            "original": [
+              "51f049d3ca129f48aec0ba71431a043aacdbbcbe"
+            ]
+          }
+        ],
+        "why_together": "Math imports this code as a squashed Torsten subtree. The single Math commit is the integration point (relative to its first parent). For Torsten Math itself, 65080ee669 contains the complete one-compartment repair and its regression tests."
+      },
+      "depends_on": [],
+      "requires": [
+        {
+          "name": "One-compartment propagator and regression",
+          "repo": "nsiccha/torsten_math",
+          "sha": "65080ee6695b12b23b7f5bc4f64c2a12907868d1",
+          "why": "This is the independently applicable source patch on Torsten Math develop at bb8266ea6bf2eebdc56e1ba82be230e3b4d70a9a."
+        }
+      ],
+      "validation": [
+        {
+          "base": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f",
+          "native_build": "Stan Math 5ee1551154db14debb2c137663fcdfd6fe800c87 with GCC 15.2.0, C++17, -O1",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_onecpt_equal_rates_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "10 tests passed. Includes exact limiting values, gradients and steady state."
+        }
+      ]
+    },
+    {
+      "id": "cpt-rate-singularities",
+      "role": "fix",
+      "title": "Two-compartment and effect-compartment solvers lose accuracy or return NaN at coincident rates",
+      "summary": "Valid rate combinations make the eigenvector formulas singular. One two-compartment effect-model case also fails when ka equals k21, even if the system has distinct eigenvalues. A shared matrix-exponential formula stays finite at these parameter values.",
+      "repairs": [],
+      "upstream_refs": [
+        {
+          "url": "https://github.com/metrumresearchgroup/torsten_math/pull/3",
+          "relation": "fixes"
+        }
+      ],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "51f049d3ca129f48aec0ba71431a043aacdbbcbe",
+            "title": "Pull nsiccha/torsten_math develop d884ec18 into the Torsten subtree",
+            "original": [
+              "51f049d3ca129f48aec0ba71431a043aacdbbcbe"
+            ]
+          }
+        ],
+        "why_together": "Math imports this code as a squashed Torsten subtree. The single Math commit is the integration point (relative to its first parent). The source repair extends the one-compartment divided differences to all four analytical models. The two patches listed below apply in order to the original Torsten Math base."
+      },
+      "depends_on": [
+        "onecpt-equal-rates"
+      ],
+      "requires": [
+        {
+          "name": "One-compartment propagator and regression",
+          "repo": "nsiccha/torsten_math",
+          "sha": "65080ee6695b12b23b7f5bc4f64c2a12907868d1",
+          "why": "This is the independently applicable source patch on Torsten Math develop at bb8266ea6bf2eebdc56e1ba82be230e3b4d70a9a."
+        },
+        {
+          "name": "Shared compartment propagator and regressions",
+          "repo": "nsiccha/torsten_math",
+          "sha": "223c4fbeb1aee068da45a2946d3a6ee859da0e37",
+          "why": "Apply after 65080ee669. Together they give the submitted production headers and regression suites. The other two PR commits adjust existing numerical test tolerances or finite-difference steps."
+        }
+      ],
+      "validation": [
+        {
+          "base": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f",
+          "native_build": "Stan Math 5ee1551154db14debb2c137663fcdfd6fe800c87 with GCC 15.2.0, C++17, -O1",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_cpt_equal_rates_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "8 tests passed. Includes the transient and steady-state compartment amounts and their gradients against independent references."
+        }
+      ]
+    },
+    {
+      "id": "effect-compartment-steady-state",
+      "role": "fix",
+      "title": "The one-compartment effect model returns the wrong steady state at distinct rates",
+      "summary": "The effect-compartment amount can be zero after dosing into that compartment. With overlapping depot infusions it can disagree with the limit of repeated transient solves even when the rates are distinct.",
+      "repairs": [],
+      "upstream_refs": [
+        {
+          "url": "https://github.com/metrumresearchgroup/torsten_math/pull/3",
+          "relation": "fixes"
+        }
+      ],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "51f049d3ca129f48aec0ba71431a043aacdbbcbe",
+            "title": "Pull nsiccha/torsten_math develop d884ec18 into the Torsten subtree",
+            "original": [
+              "51f049d3ca129f48aec0ba71431a043aacdbbcbe"
+            ]
+          }
+        ],
+        "why_together": "Math imports this code as a squashed Torsten subtree. The single Math commit is the integration point (relative to its first parent). 223c4fbeb1 replaces the incorrect steady-state transformation as part of the same propagator change used by the other analytical models. It applies on top of 65080ee669."
+      },
+      "depends_on": [
+        "onecpt-equal-rates"
+      ],
+      "requires": [
+        {
+          "name": "One-compartment propagator and regression",
+          "repo": "nsiccha/torsten_math",
+          "sha": "65080ee6695b12b23b7f5bc4f64c2a12907868d1",
+          "why": "This is the independently applicable source patch on Torsten Math develop at bb8266ea6bf2eebdc56e1ba82be230e3b4d70a9a."
+        },
+        {
+          "name": "Shared compartment propagator and regressions",
+          "repo": "nsiccha/torsten_math",
+          "sha": "223c4fbeb1aee068da45a2946d3a6ee859da0e37",
+          "why": "Apply after 65080ee669. Together they give the submitted production headers and regression suites. The other two PR commits adjust existing numerical test tolerances or finite-difference steps."
+        }
+      ],
+      "validation": [
+        {
+          "base": "9061cec991fe8ad9ba0fa8da569ddb704cde4b2f",
+          "native_build": "Stan Math 5ee1551154db14debb2c137663fcdfd6fe800c87 with GCC 15.2.0, C++17, -O1",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_cpt_equal_rates_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "8 tests passed. Includes the transient and steady-state compartment amounts and their gradients against independent references."
+        }
+      ]
+    }
+  ]
+}
