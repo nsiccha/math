@@ -14,5 +14,6 @@ g++ -std=c++17 -O3 -pthread -D_REENTRANT -DBOOST_DISABLE_ASSERTS \
   -isystem "$root/lib/sundials_6.1.1/src/sundials" \
   "$here/bench.cpp" -o "$here/bench" \
   "$root/lib/sundials_6.1.1/lib/libsundials_cvodes.a" \
+  "$root/lib/sundials_6.1.1/lib/libsundials_idas.a" \
   "$root/lib/sundials_6.1.1/lib/libsundials_nvecserial.a" \
   -L "$root/lib/tbb" -ltbb -Wl,-rpath,"$root/lib/tbb"
