@@ -153,7 +153,7 @@ class cvodes_integrator_adjoint_vari : public vari_base {
       if (cvodes_mem_ == nullptr) {
         throw std::runtime_error("CVodeCreate failed to allocate memory");
       }
-      if constexpr (internal::is_ode_jacobian_pair<std::decay_t<F>>::value) {
+      if constexpr (internal::has_user_jacobian<std::decay_t<F>>::value) {
         jac_var_columns_
             = internal::ode_jacobian_var_columns(jac_num_arg_columns_, args...);
       }
@@ -599,6 +599,23 @@ class cvodes_integrator_adjoint_vari : public vari_base {
   }
 
   /**
+   * Evaluate the user pullback (see internal::ode_jacobian_pullback_pair)
+   * lambda^T [df/dy | df/dargs] at (t, y) for lambda = yB.
+   */
+  inline Eigen::VectorXd user_pullback(double t, N_Vector y,
+                                       N_Vector yB) const {
+    const Eigen::VectorXd y_vec
+        = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(y), N_);
+    const Eigen::VectorXd lambda
+        = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yB), N_);
+    return internal::eval_user_pullback(
+        static_cast<std::tuple<T_Args...>*>(nullptr),
+        solver_->function_name_str_.c_str(), solver_->f_, t, y_vec, lambda,
+        msgs_, solver_->value_of_args_tuple_, solver_->jac_num_arg_columns_,
+        solver_->jac_var_columns_);
+  }
+
+  /**
    * Implements the function of type CVRhsFn which is the user-defined
    * ODE RHS passed to CVODES.
    */
@@ -619,7 +636,11 @@ class cvodes_integrator_adjoint_vari : public vari_base {
    * @param[out] yBdot evaluation of adjoint ODE RHS
    */
   inline int rhs_adj(double t, N_Vector y, N_Vector yB, N_Vector yBdot) const {
-    if constexpr (internal::is_ode_jacobian_pair<std::decay_t<F>>::value) {
+    if constexpr (internal::has_user_pullback<std::decay_t<F>>::value) {
+      const Eigen::VectorXd g = user_pullback(t, y, yB);
+      Eigen::Map<Eigen::VectorXd>(NV_DATA_S(yBdot), N_) = -g.head(N_);
+      return 0;
+    } else if constexpr (internal::has_user_jacobian<std::decay_t<F>>::value) {
       const Eigen::MatrixXd jac = user_jacobian(t, y);
       Eigen::Map<Eigen::VectorXd>(NV_DATA_S(yBdot), N_).noalias()
           = -jac.leftCols(N_).transpose()
@@ -661,7 +682,14 @@ class cvodes_integrator_adjoint_vari : public vari_base {
    * @param[out] qBdot evaluation of adjoint ODE quadrature RHS
    */
   inline int quad_rhs_adj(double t, N_Vector y, N_Vector yB, N_Vector qBdot) {
-    if constexpr (internal::is_ode_jacobian_pair<std::decay_t<F>>::value) {
+    if constexpr (internal::has_user_pullback<std::decay_t<F>>::value) {
+      const Eigen::VectorXd g = user_pullback(t, y, yB);
+      double* qBdot_data = NV_DATA_S(qBdot);
+      for (size_t s = 0; s < solver_->jac_var_columns_.size(); ++s) {
+        qBdot_data[s] = -g.coeff(N_ + solver_->jac_var_columns_[s]);
+      }
+      return 0;
+    } else if constexpr (internal::has_user_jacobian<std::decay_t<F>>::value) {
       const Eigen::MatrixXd jac = user_jacobian(t, y);
       Eigen::Map<const Eigen::VectorXd> yB_vec(NV_DATA_S(yB), N_);
       double* qBdot_data = NV_DATA_S(qBdot);
@@ -707,7 +735,7 @@ class cvodes_integrator_adjoint_vari : public vari_base {
    */
   inline int jacobian_rhs_states(double t, N_Vector y, SUNMatrix J) const {
     Eigen::Map<Eigen::MatrixXd> Jfy(SM_DATA_D(J), N_, N_);
-    if constexpr (internal::is_ode_jacobian_pair<std::decay_t<F>>::value) {
+    if constexpr (internal::has_user_jacobian<std::decay_t<F>>::value) {
       Jfy = user_jacobian(t, y).leftCols(N_);
       return 0;
     }

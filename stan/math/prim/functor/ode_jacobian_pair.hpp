@@ -67,6 +67,49 @@ template <typename F, typename FJac>
 struct is_ode_jacobian_pair<ode_jacobian_pair<F, FJac>> : std::true_type {};
 
 /**
+ * A right-hand side with its user Jacobian and a user pullback: a functor
+ * taking (t, y, lambda, msgs, args...) and returning the vector
+ * lambda^T [df/dy | df/dargs] of length N + P, in the column order of the
+ * Jacobian. The adjoint solver uses the pullback for its backward
+ * right-hand side and quadrature, and the Jacobian for its Newton
+ * iterations.
+ */
+template <typename F, typename FJac, typename FPull>
+struct ode_jacobian_pullback_pair : ode_jacobian_pair<F, FJac> {
+  const std::decay_t<FPull> pull_;
+
+  ode_jacobian_pullback_pair(const F& f, const FJac& jac, const FPull& pull)
+      : ode_jacobian_pair<F, FJac>(f, jac), pull_(pull) {}
+
+  /**
+   * Evaluate the user pullback.
+   */
+  template <typename... Args>
+  inline auto pullback(Args&&... args) const {
+    return pull_(std::forward<Args>(args)...);
+  }
+};
+
+/**
+ * Whether F carries a user Jacobian (an ode_jacobian_pair, alone or with a
+ * pullback).
+ */
+template <typename T>
+struct has_user_jacobian : is_ode_jacobian_pair<T> {};
+
+template <typename F, typename FJac, typename FPull>
+struct has_user_jacobian<ode_jacobian_pullback_pair<F, FJac, FPull>>
+    : std::true_type {};
+
+/** Whether F carries a user pullback. */
+template <typename T>
+struct has_user_pullback : std::false_type {};
+
+template <typename F, typename FJac, typename FPull>
+struct has_user_pullback<ode_jacobian_pullback_pair<F, FJac, FPull>>
+    : std::true_type {};
+
+/**
  * Walk one argument in the order <code>count_vars</code> visits its
  * scalars, recording for every autodiff scalar the index of its column in
  * the parameter block of a user Jacobian.

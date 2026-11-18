@@ -302,6 +302,48 @@ inline auto ode_adjoint_tol_ctl(
       solver_forward, solver_backward, msgs, args...);
 }
 
+/**
+ * Solve an ODE with the adjoint sensitivity method given its right-hand
+ * side, a user-supplied Jacobian and a user-supplied pullback; see the
+ * <code>ode_adjoint_tol_ctl</code> overload taking a Jacobian.
+ *
+ * <p>The backward right-hand side and the quadrature use the pullback
+ * lambda^T [df/dy | df/dargs] instead of forming the Jacobian; the Newton
+ * iterations of the forward and backward solves use the Jacobian.
+ *
+ * @param pullback functor taking (t, y, lambda, msgs, args...) and
+ *   returning lambda^T [df/dy | df/dargs], a vector of length N + P in the
+ *   column order of the Jacobian (see
+ *   <code>internal::ode_jacobian_pair</code>).
+ */
+template <typename F, typename FJac, typename FPull, typename T_y0,
+          typename T_t0, typename T_ts, typename T_abs_tol_fwd,
+          typename T_abs_tol_bwd, typename... T_Args,
+          require_all_eigen_col_vector_t<T_y0, T_abs_tol_fwd,
+                                         T_abs_tol_bwd>* = nullptr>
+inline auto ode_adjoint_tol_ctl(
+    F&& f, FJac&& jac, FPull&& pullback, const T_y0& y0, const T_t0& t0,
+    const std::vector<T_ts>& ts, double relative_tolerance_forward,
+    const T_abs_tol_fwd& absolute_tolerance_forward,
+    double relative_tolerance_backward,
+    const T_abs_tol_bwd& absolute_tolerance_backward,
+    double relative_tolerance_quadrature, double absolute_tolerance_quadrature,
+    long int max_num_steps,                  // NOLINT(runtime/int)
+    long int num_steps_between_checkpoints,  // NOLINT(runtime/int)
+    int interpolation_polynomial, int solver_forward, int solver_backward,
+    std::ostream* msgs, const T_Args&... args) {
+  return ode_adjoint_impl(
+      "ode_adjoint_tol_ctl",
+      internal::ode_jacobian_pullback_pair<std::decay_t<F>, std::decay_t<FJac>,
+                                           std::decay_t<FPull>>(f, jac,
+                                                                pullback),
+      y0, t0, ts, relative_tolerance_forward, absolute_tolerance_forward,
+      relative_tolerance_backward, absolute_tolerance_backward,
+      relative_tolerance_quadrature, absolute_tolerance_quadrature,
+      max_num_steps, num_steps_between_checkpoints, interpolation_polynomial,
+      solver_forward, solver_backward, msgs, args...);
+}
+
 }  // namespace math
 }  // namespace stan
 #endif
