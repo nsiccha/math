@@ -96,6 +96,56 @@ def hires():
     return y, k, f
 
 
+def robertson_dae():
+    """Robertson's chemical kinetics as an index-1 DAE: two differential
+    equations and the conservation law as an algebraic one."""
+    yy = sp.symbols("y0:3")
+    yp = sp.symbols("yp0:3")
+    k1, k2, k3 = sp.symbols("k1 k2 k3")
+    r = [
+        yp[0] + k1 * yy[0] - k3 * yy[1] * yy[2],
+        yp[1] - k1 * yy[0] + k3 * yy[1] * yy[2] + k2 * yy[1] ** 2,
+        yy[0] + yy[1] + yy[2] - 1,
+    ]
+    return yy, yp, (k1, k2, k3), r
+
+
+def as_dae(states, params, f):
+    """The residual yp - f(y) of an ODE."""
+    yp = sp.symbols(f"yp0:{len(states)}")
+    return states, yp, params, [yp[i] - f[i] for i in range(len(states))]
+
+
+def idr_delay():
+    """One-compartment oral PK driving an indirect response through the
+    concentration delayed by tau (effect delay)."""
+    a0, a1, r = sp.symbols("a0 a1 R")
+    lag = sp.symbols("lag0_0 lag1_0 lag2_0")
+    ka, cl, v, kin, kout, ic50, imax = sp.symbols("ka CL V kin kout IC50 Imax")
+    c_lag = lag[1] / v
+    f = [
+        -ka * a0,
+        ka * a0 - cl / v * a1,
+        kin * (1 - imax * c_lag / (ic50 + c_lag)) - kout * r,
+    ]
+    return (a0, a1, r), [lag], (ka, cl, v, kin, kout, ic50, imax), f
+
+
+def delayed_logistic_rd(n):
+    """1-D diffusion with delayed logistic growth (Hutchinson's equation),
+    zero-flux boundaries."""
+    y = sp.symbols(f"y0:{n}")
+    lag = sp.symbols(f"lag0:{n}_0")
+    D, r = sp.symbols("D r")
+    h2 = sp.Rational(1, (n - 1) ** 2)
+    f = []
+    for i in range(n):
+        left = y[i - 1] if i > 0 else y[i + 1]
+        right = y[i + 1] if i < n - 1 else y[i - 1]
+        f.append(D * (left - 2 * y[i] + right) / h2 + r * y[i] * (1 - lag[i]))
+    return y, [lag], (D, r), f
+
+
 MODELS = {
     "pk2": pk2(),
     "idr": idr(),
@@ -165,6 +215,84 @@ def emit(name, states, params, f):
     return "\n".join(out)
 
 
+DAE_MODELS = {
+    "robertson_dae": robertson_dae(),
+    "pk2_dae": as_dae(*pk2()),
+    "transit30_dae": as_dae(*transit(30)),
+    "rd20_dae": as_dae(*logistic_rd(20)),
+}
+
+DDE_MODELS = {
+    "idr_dde": idr_delay(),
+    "rd20_dde": delayed_logistic_rd(20),
+}
+
+
+def emit_functors(name, groups, params, f, signature, lag=None):
+    """Emit <name>_rhs and <name>_jac for a residual/right-hand side f of
+    the state groups (each a list of symbols mapped to an Eigen argument)
+    and the parameters theta. signature: C++ parameter list of the state
+    groups; lag: optional list of lag symbol columns mapped to y_lag(k, j)."""
+    subs = {}
+    for gname, syms in groups:
+        subs.update({s_: sp.Symbol(f"{gname}({i})") for i, s_ in enumerate(syms)})
+    columns = [s_ for _, syms in groups for s_ in syms]
+    if lag is not None:
+        for j, col in enumerate(lag):
+            subs.update({s_: sp.Symbol(f"y_lag({k}, {j})") for k, s_ in enumerate(col)})
+            columns += list(col)
+    subs.update({s_: sp.Symbol(f"theta({j})") for j, s_ in enumerate(params)})
+    columns += list(params)
+    n = len(f)
+    tparams = "typename T0, " + ", ".join(f"typename T{g}" for g, _ in groups)
+    if lag is not None:
+        tparams += ", typename TL"
+    tparams += ", typename TP"
+    stypes = "T0, " + ", ".join(f"T{g}" for g, _ in groups)
+    if lag is not None:
+        stypes += ", TL"
+    stypes += ", TP"
+    out = []
+    for kind in ("rhs", "jac"):
+        out.append(f"struct {name}_{kind} {{")
+        if kind == "rhs":
+            out.append(f"  static constexpr int N = {n};")
+            out.append(f"  static constexpr int P = {len(params)};")
+        out.append(f"  template <{tparams}>")
+        ret = "-1, 1" if kind == "rhs" else "-1, -1"
+        out.append(f"  Eigen::Matrix<stan::return_type_t<{stypes}>, {ret}>")
+        out.append(f"  operator()(const T0& t, {signature}, std::ostream* msgs,")
+        out.append("             const TP& theta) const {")
+        out.append(f"    using S = stan::return_type_t<{stypes}>;")
+        if kind == "rhs":
+            reps, red = sp.cse(f)
+            for sym, e in reps:
+                out.append(f"    const S {sym} = {cxx(e, subs)};")
+            out.append(f"    Eigen::Matrix<S, -1, 1> r({n});")
+            for i, e in enumerate(red):
+                out.append(f"    r({i}) = {cxx(e, subs)};")
+            out.append("    return r;")
+        else:
+            entries = []
+            for i, fi in enumerate(f):
+                for j, v in enumerate(columns):
+                    d = sp.diff(fi, v)
+                    if d != 0:
+                        entries.append(((i, j), d))
+            reps, red = sp.cse([e for _, e in entries])
+            for sym, e in reps:
+                out.append(f"    const S {sym} = {cxx(e, subs)};")
+            out.append(
+                f"    Eigen::Matrix<S, -1, -1> J = Eigen::Matrix<S, -1, -1>::Zero({n}, {len(columns)});"
+            )
+            for ((i, j), _), e in zip(entries, red):
+                out.append(f"    J({i}, {j}) = {cxx(e, subs)};")
+            out.append("    return J;")
+        out.append("  }")
+        out.append("};")
+    return "\n".join(out)
+
+
 def main():
     print("// Generated by gen_models.py; do not edit.")
     print("#ifndef ODE_JACOBIAN_BENCHMARK_MODELS_HPP")
@@ -174,6 +302,12 @@ def main():
     print("using std::pow;")
     for name, (states, params, f) in MODELS.items():
         print(emit(name, states, params, f))
+    for name, (yy, yp, params, r) in DAE_MODELS.items():
+        print(emit_functors(name, [("YY", yy), ("YP", yp)], params, r,
+                            "const TYY& YY, const TYP& YP"))
+    for name, (y, lag, params, f) in DDE_MODELS.items():
+        print(emit_functors(name, [("Y", y)], params, f,
+                            "const TY& Y, const TL& y_lag", lag=lag))
     print("#endif")
 
 

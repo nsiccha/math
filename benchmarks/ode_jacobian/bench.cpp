@@ -18,7 +18,7 @@
 using Eigen::VectorXd;
 using stan::math::var;
 
-enum class Solver { rk45, bdf };
+enum class Solver { rk45, bdf, adjoint };
 
 struct Result {
   std::vector<double> vals;
@@ -39,6 +39,20 @@ auto solve(Solver solver, const TY0& y0, double t0,
     } else {
       return stan::math::ode_rk45_tol(f, y0, t0, ts, rtol, atol, max_steps,
                                       nullptr, theta);
+    }
+  } else if (solver == Solver::adjoint) {
+    const Eigen::VectorXd atol_vec = Eigen::VectorXd::Constant(y0.size(), atol);
+    const int checkpoints = 150;
+    const int hermite = 1;
+    const int bdf = 2;
+    if constexpr (UseJac) {
+      return stan::math::ode_adjoint_tol_ctl(
+          f, jac, y0, t0, ts, rtol, atol_vec, rtol, atol_vec, rtol, atol,
+          max_steps, checkpoints, hermite, bdf, bdf, nullptr, theta);
+    } else {
+      return stan::math::ode_adjoint_tol_ctl(
+          f, y0, t0, ts, rtol, atol_vec, rtol, atol_vec, rtol, atol, max_steps,
+          checkpoints, hermite, bdf, bdf, nullptr, theta);
     }
   } else {
     if constexpr (UseJac) {
@@ -198,21 +212,146 @@ void bench(const std::string& name, Solver solver, const VectorXd& y0,
       = run_once<true, Rhs, Jac>(solver, y0, y0_var, t0, ts, rtol, atol, theta);
   const auto [t_ad, t_uj] = time_runs<Rhs, Jac>(solver, y0, y0_var, t0, ts,
                                                 rtol, atol, theta, budget_s);
-  const auto [r_ad, r_uj] = time_rhs<Rhs, Jac>(y0, y0_var, theta, ts[0]);
+  // the coupled forward-sensitivity right-hand side; the adjoint solver
+  // does not use it
+  const auto [r_ad, r_uj] = solver == Solver::adjoint
+                                ? std::pair<double, double>{0.0, 0.0}
+                                : time_rhs<Rhs, Jac>(y0, y0_var, theta, ts[0]);
   const int num_sens = theta.size() + (y0_var ? y0.size() : 0);
   std::cout << std::left << std::setw(11) << name << std::setw(6)
-            << (solver == Solver::rk45 ? "rk45" : "bdf") << std::right
-            << std::setw(4) << Rhs::N << std::setw(5) << num_sens
+            << (solver == Solver::rk45  ? "rk45"
+                : solver == Solver::bdf ? "bdf"
+                                        : "adj")
+            << std::right << std::setw(4) << Rhs::N << std::setw(5) << num_sens
             << std::setw(7) << (y0_var ? "var" : "data") << std::fixed
             << std::setprecision(3) << std::setw(12) << t_ad * 1e3
             << std::setw(12) << t_uj * 1e3 << std::setprecision(1)
             << std::setw(9) << t_ad / t_uj << std::scientific
             << std::setprecision(1) << std::setw(11)
             << max_rel_diff(ad.vals, uj.vals, atol) << std::setw(11)
-            << max_rel_diff(ad.grads, uj.grads, atol) << std::fixed
-            << std::setprecision(2) << std::setw(10) << r_ad * 1e6
-            << std::setw(10) << r_uj * 1e6 << std::setprecision(1)
-            << std::setw(8) << r_ad / r_uj << std::endl;
+            << max_rel_diff(ad.grads, uj.grads, atol);
+  if (solver != Solver::adjoint) {
+    std::cout << std::fixed << std::setprecision(2) << std::setw(10)
+              << r_ad * 1e6 << std::setw(10) << r_uj * 1e6
+              << std::setprecision(1) << std::setw(8) << r_ad / r_uj;
+  }
+  std::cout << std::endl;
+}
+
+// Weighted sum of all outputs, its gradient with respect to theta, and the
+// output values.
+template <typename Sol>
+Result collect(const Sol& sol, const Eigen::Matrix<var, -1, 1>& theta_v) {
+  Result res;
+  var lp = 0;
+  for (size_t i = 0; i < sol.size(); ++i) {
+    for (int k = 0; k < sol[i].size(); ++k) {
+      const double w = 1.0 + 0.1 * std::sin(1.0 + i + 7.0 * k);
+      lp += w * sol[i](k);
+      res.vals.push_back(sol[i](k).val());
+    }
+  }
+  lp.grad();
+  for (int j = 0; j < theta_v.size(); ++j) {
+    res.grads.push_back(theta_v(j).adj());
+  }
+  return res;
+}
+
+// Median wall times of alternating runs of two callables.
+template <typename RunAD, typename RunJ>
+std::pair<double, double> time_pair(const RunAD& run_ad, const RunJ& run_j,
+                                    double budget_s) {
+  using clock = std::chrono::steady_clock;
+  auto once = [&](const auto& run) {
+    auto start = clock::now();
+    run();
+    return std::chrono::duration<double>(clock::now() - start).count();
+  };
+  once(run_ad);
+  once(run_j);
+  const double first = once(run_ad) + once(run_j);
+  const int reps
+      = std::max(7, std::min(3000, static_cast<int>(budget_s / first)));
+  std::vector<double> t_ad, t_j;
+  for (int r = 0; r < reps; ++r) {
+    t_ad.push_back(once(run_ad));
+    t_j.push_back(once(run_j));
+  }
+  auto median = [](std::vector<double>& v) {
+    std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
+    return v[v.size() / 2];
+  };
+  return {median(t_ad), median(t_j)};
+}
+
+void print_row(const std::string& name, const std::string& solver, int n,
+               int num_sens, const Result& ad, const Result& uj, double t_ad,
+               double t_uj, double atol) {
+  std::cout << std::left << std::setw(11) << name << std::setw(6) << solver
+            << std::right << std::setw(4) << n << std::setw(5) << num_sens
+            << std::setw(7) << "data" << std::fixed << std::setprecision(3)
+            << std::setw(12) << t_ad * 1e3 << std::setw(12) << t_uj * 1e3
+            << std::setprecision(1) << std::setw(9) << t_ad / t_uj
+            << std::scientific << std::setprecision(1) << std::setw(11)
+            << max_rel_diff(ad.vals, uj.vals, atol) << std::setw(11)
+            << max_rel_diff(ad.grads, uj.grads, atol) << std::endl;
+}
+
+template <typename Res, typename Jac>
+void bench_dae(const std::string& name, const VectorXd& yy0,
+               const VectorXd& yp0, const VectorXd& theta,
+               const std::vector<double>& ts, double tol, double budget_s) {
+  auto run = [&](auto use_jac) {
+    Result res;
+    {
+      Eigen::Matrix<var, -1, 1> theta_v = theta.template cast<var>();
+      std::vector<Eigen::Matrix<var, -1, 1>> sol;
+      if constexpr (decltype(use_jac)::value) {
+        sol = stan::math::dae_tol(Res(), Jac(), yy0, yp0, 0.0, ts, tol, tol,
+                                  100000000, nullptr, theta_v);
+      } else {
+        sol = stan::math::dae_tol(Res(), yy0, yp0, 0.0, ts, tol, tol, 100000000,
+                                  nullptr, theta_v);
+      }
+      res = collect(sol, theta_v);
+    }
+    stan::math::recover_memory();
+    return res;
+  };
+  const Result ad = run(std::false_type{});
+  const Result uj = run(std::true_type{});
+  const auto [t_ad, t_uj] = time_pair([&] { run(std::false_type{}); },
+                                      [&] { run(std::true_type{}); }, budget_s);
+  print_row(name, "idas", Res::N, theta.size(), ad, uj, t_ad, t_uj, tol);
+}
+
+template <typename Rhs, typename Jac>
+void bench_dde(const std::string& name, const VectorXd& y0, const VectorXd& tau,
+               const VectorXd& theta, const std::vector<double>& ts, double tol,
+               double budget_s) {
+  auto run = [&](auto use_jac) {
+    Result res;
+    {
+      Eigen::Matrix<var, -1, 1> theta_v = theta.template cast<var>();
+      std::vector<Eigen::Matrix<var, -1, 1>> sol;
+      if constexpr (decltype(use_jac)::value) {
+        sol = stan::math::dde_rk45_tol(Rhs(), Jac(), y0, 0.0, ts, tau, tol, tol,
+                                       1000000, nullptr, theta_v);
+      } else {
+        sol = stan::math::dde_rk45_tol(Rhs(), y0, 0.0, ts, tau, tol, tol,
+                                       1000000, nullptr, theta_v);
+      }
+      res = collect(sol, theta_v);
+    }
+    stan::math::recover_memory();
+    return res;
+  };
+  const Result ad = run(std::false_type{});
+  const Result uj = run(std::true_type{});
+  const auto [t_ad, t_uj] = time_pair([&] { run(std::false_type{}); },
+                                      [&] { run(std::true_type{}); }, budget_s);
+  print_row(name, "dde45", Rhs::N, theta.size(), ad, uj, t_ad, t_uj, tol);
 }
 
 std::vector<double> linspace_ts(double a, double b, int n) {
@@ -234,6 +373,8 @@ VectorXd bump(int n) {
 
 int main(int argc, char** argv) {
   const double budget = argc > 1 ? std::stod(argv[1]) : 1.0;
+  // "ode": the rk45/bdf rows; "more": adjoint, DAE and DDE rows; "all"
+  const std::string only = argc > 2 ? argv[2] : "all";
   std::cout << "model      solver  N  sens  y0     AD [ms]    jac [ms]  "
                "speedup  dvals      dgrads     rhsAD[us] rhsJ[us]  rhs x"
             << std::endl;
@@ -241,6 +382,60 @@ int main(int argc, char** argv) {
   VectorXd pk2_y0(3), pk2_th(5);
   pk2_y0 << 100, 0, 0;
   pk2_th << 1.0, 4.0, 2.0, 20.0, 50.0;
+  VectorXd tr_th(3);
+  tr_th << 2.0, 3.0, 20.0;
+  VectorXd rd_th(2);
+  rd_th << 0.01, 1.0;
+  const std::vector<double> ts_rd = linspace_ts(0.5, 5, 10);
+  if (only == "all" || only == "more") {
+    // adjoint sensitivities (CVODES BDF forward and backward)
+    VectorXd tr30_y0 = VectorXd::Zero(32);
+    tr30_y0(0) = 100;
+    bench<pk2_rhs, pk2_jac>("pk2", Solver::adjoint, pk2_y0, false, 0, ts_pk,
+                            1e-8, 1e-8, pk2_th, budget);
+    bench<transit30_rhs, transit30_jac>("transit30", Solver::adjoint, tr30_y0,
+                                        false, 0, ts_pk, 1e-8, 1e-8, tr_th,
+                                        budget);
+    bench<rd50_rhs, rd50_jac>("rd50", Solver::adjoint, bump(50), false, 0,
+                              ts_rd, 1e-8, 1e-8, rd_th, budget);
+    // DAEs (IDAS)
+    VectorXd rob_yy(3), rob_yp(3), rob_k(3);
+    rob_yy << 1, 0, 0;
+    rob_yp << -0.04, 0.04, 0;
+    rob_k << 0.04, 3e7, 1e4;
+    std::vector<double> ts_rob;
+    for (int k = 0; k < 8; ++k) {
+      ts_rob.push_back(0.4 * std::pow(10.0, k));
+    }
+    bench_dae<robertson_dae_rhs, robertson_dae_jac>(
+        "robertson", rob_yy, rob_yp, rob_k, ts_rob, 1e-8, budget);
+    auto ode_yp = [](const auto& f, const VectorXd& y, const VectorXd& th) {
+      return VectorXd(f(0.0, y, nullptr, th));
+    };
+    bench_dae<pk2_dae_rhs, pk2_dae_jac>("pk2", pk2_y0,
+                                        ode_yp(pk2_rhs(), pk2_y0, pk2_th),
+                                        pk2_th, ts_pk, 1e-8, budget);
+    bench_dae<transit30_dae_rhs, transit30_dae_jac>(
+        "transit30", tr30_y0, ode_yp(transit30_rhs(), tr30_y0, tr_th), tr_th,
+        ts_pk, 1e-8, budget);
+    bench_dae<rd20_dae_rhs, rd20_dae_jac>("rd20", bump(20),
+                                          ode_yp(rd20_rhs(), bump(20), rd_th),
+                                          rd_th, ts_rd, 1e-8, budget);
+    // DDEs (dde_rk45)
+    VectorXd idr_y0(3), idr_th(7), tau1(1);
+    idr_y0 << 100, 0, 10;
+    idr_th << 1.0, 2.0, 10.0, 5.0, 0.5, 1.0, 0.8;
+    tau1 << 2.0;
+    bench_dde<idr_dde_rhs, idr_dde_jac>("idr", idr_y0, tau1, idr_th,
+                                        linspace_ts(1, 48, 24), 1e-6, budget);
+    VectorXd tau_rd(1);
+    tau_rd << 1.0;
+    bench_dde<rd20_dde_rhs, rd20_dde_jac>("rd20", bump(20), tau_rd, rd_th,
+                                          ts_rd, 1e-6, budget);
+  }
+  if (only == "more") {
+    return 0;
+  }
   for (Solver s : {Solver::rk45, Solver::bdf}) {
     const double tol = s == Solver::rk45 ? 1e-6 : 1e-8;
     bench<pk2_rhs, pk2_jac>("pk2", s, pk2_y0, false, 0, ts_pk, tol, tol, pk2_th,
@@ -257,8 +452,6 @@ int main(int argc, char** argv) {
     bench<idr_rhs, idr_jac>("idr", s, idr_y0, false, 0, ts_idr, tol, tol,
                             idr_th, budget);
   }
-  VectorXd tr_th(3);
-  tr_th << 2.0, 3.0, 20.0;
   VectorXd tr10_y0 = VectorXd::Zero(12);
   tr10_y0(0) = 100;
   VectorXd tr30_y0 = VectorXd::Zero(32);
@@ -287,9 +480,6 @@ int main(int argc, char** argv) {
   bench<hires_rhs, hires_jac>("hires", Solver::bdf, hires_y0, false, 0,
                               linspace_ts(32.18122, 321.8122, 10), 1e-6, 1e-8,
                               hires_th, budget);
-  VectorXd rd_th(2);
-  rd_th << 0.01, 1.0;
-  const std::vector<double> ts_rd = linspace_ts(0.5, 5, 10);
   for (Solver s : {Solver::rk45, Solver::bdf}) {
     const double tol = s == Solver::rk45 ? 1e-6 : 1e-8;
     bench<rd20_rhs, rd20_jac>("rd20", s, bump(20), false, 0, ts_rd, tol, tol,
