@@ -4,6 +4,7 @@
 #include <stan/math/rev/core.hpp>
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/prim/err.hpp>
+#include <stan/math/torsten/dsolve/pmx_user_jacobian.hpp>
 #include <Eigen/Dense>
 #include <ostream>
 #include <vector>
@@ -75,7 +76,11 @@ namespace dsolve {
    * since earlier intervals made y depend on it.
    *
    * The Jacobian-vector products use nested reverse mode, one sweep per
-   * compartment.
+   * compartment, unless F pairs the right hand side with its Jacobian
+   * (<code>PMXJacobianPair</code>): then the Jacobian
+   *   [J_y | J_lag,1 ... J_lag,D | J_theta | J_x_r]
+   * comes from the user in doubles and the sensitivity right hand side is
+   * a matrix product.
    *
    * @tparam F type of the user's right hand side, called as
    *   <code>f(t, y, y_lag, theta, x_r, x_i, msgs)</code> with an Eigen column
@@ -84,6 +89,9 @@ namespace dsolve {
   template <typename F>
   class PMXDdeSystem {
   public:
+    /// whether F provides the user's Jacobian
+    static constexpr bool use_user_jacobian = pmx_has_user_jacobian<F>::value;
+
     /**
      * @param f the user's right hand side
      * @param ncmt number of compartments
@@ -111,7 +119,38 @@ namespace dsolve {
      * Use the given right hand side from now on. The system keeps a
      * reference to it.
      */
-    void set_rhs(const PMXDdeRhs& rhs) { rhs_ = &rhs; }
+    void set_rhs(const PMXDdeRhs& rhs) {
+      rhs_ = &rhs;
+      if (use_user_jacobian) {
+        theta_columns_.resize(rhs.theta.size());
+        for (size_t k = 0; k < theta_columns_.size(); ++k) {
+          theta_columns_[k] = k;
+        }
+      }
+    }
+
+    /**
+     * The user's Jacobian of f at (t, y, y_lag) and the current interval's
+     * theta and data, nCmt x (nCmt + nCmt D + size(theta) + size(x_r)).
+     * Every entry of theta counts as an autodiff argument: the right hand
+     * side takes theta as autodiff variables on the autodiff path.
+     */
+    template <typename F0 = F, std::enable_if_t<pmx_has_user_jacobian<F0>::value>* = nullptr>
+    Eigen::MatrixXd user_jacobian(double t, const Eigen::VectorXd& y,
+                                  const Eigen::MatrixXd& y_lag) const {
+      using rhs_t = PMXDdeStreamLast<std::decay_t<decltype(f_.f_)>>;
+      using jac_t = PMXDdeStreamLast<std::decay_t<decltype(f_.jac_)>>;
+      using origs_t = std::tuple<std::vector<stan::math::var>, std::vector<double>,
+                                 std::vector<int>>;
+      const PMXDdeRhs& rhs = *rhs_;
+      const stan::math::internal::ode_jacobian_pair<rhs_t, jac_t> f_jac(rhs_t(f_.f_),
+                                                                         jac_t(f_.jac_));
+      return stan::math::internal::eval_user_jacobian(
+          static_cast<const origs_t*>(nullptr), "pmx_solve_dde_rk45", f_jac, t,
+          std::forward_as_tuple(y, y_lag), msgs_,
+          std::forward_as_tuple(rhs.theta, *rhs.x_r, *rhs.x_i),
+          rhs.theta.size() + rhs.x_r->size(), theta_columns_);
+    }
 
     /**
      * The current right hand side.
@@ -162,6 +201,19 @@ namespace dsolve {
                               Eigen::MatrixXd& jac_x, Eigen::MatrixXd& jac_p) const {
       using stan::math::var;
       const PMXDdeRhs& rhs = *rhs_;
+      if constexpr (use_user_jacobian) {
+        const Eigen::MatrixXd jac = user_jacobian(t, x, x.replicate(1, d_));
+        jac_x = jac.leftCols(n_);
+        for (size_t j = 0; j < d_; ++j) {
+          jac_x += jac.middleCols(n_ * (1 + j), n_);
+        }
+        jac_p = Eigen::MatrixXd::Zero(n_, p_);
+        add_theta_columns(jac, jac_p);
+        if (rhs.rate_sensitivities.size() > 0) {
+          jac_p += rhs.rate_sensitivities;
+        }
+        return;
+      }
       stan::math::nested_rev_autodiff nested;
       Eigen::Matrix<var, -1, 1> y(n_);
       for (size_t i = 0; i < n_; ++i) {
@@ -208,6 +260,30 @@ namespace dsolve {
       }
 
       const PMXDdeRhs& rhs = *rhs_;
+      if constexpr (use_user_jacobian) {
+        const Eigen::VectorXd y = z.head(n_);
+        const Eigen::MatrixXd y_lag = z_lag.topRows(n_);
+        dz_dt.head(n_) = base(t, y, y_lag);
+        const Eigen::MatrixXd jac = user_jacobian(t, y, y_lag);
+        Eigen::Map<Eigen::MatrixXd> dsens(dz_dt.data() + n_, n_, p_);
+        dsens.noalias() = jac.leftCols(n_)
+                          * Eigen::Map<const Eigen::MatrixXd>(z.data() + n_, n_, p_);
+        for (size_t j = 0; j < d_; ++j) {
+          const auto jac_lag = jac.middleCols(n_ * (1 + j), n_);
+          dsens.noalias()
+              += jac_lag * Eigen::Map<const Eigen::MatrixXd>(z_lag.col(j).data() + n_, n_, p_);
+          if (lag_derivatives_) {
+            dsens.noalias() -= (jac_lag * z_lag_deriv.col(j))
+                               * delay_sensitivities_.col(j).transpose();
+          }
+        }
+        add_theta_columns(jac, dsens);
+        if (rhs.rate_sensitivities.size() > 0) {
+          dsens += rhs.rate_sensitivities;
+        }
+        return;
+      }
+
       stan::math::nested_rev_autodiff nested;
 
       Eigen::Matrix<var, -1, 1> y(n_);
@@ -260,6 +336,21 @@ namespace dsolve {
     }
 
   private:
+    /**
+     * Add the theta columns of a user Jacobian to the columns of the global
+     * parameters the entries of theta are.
+     */
+    template <typename T>
+    void add_theta_columns(const Eigen::MatrixXd& jac, T&& dest) const {
+      const PMXDdeRhs& rhs = *rhs_;
+      const size_t first = n_ * (1 + d_);
+      for (size_t k = 0; k < rhs.theta.size(); ++k) {
+        if (rhs.theta_index[k] >= 0) {
+          dest.col(rhs.theta_index[k]) += jac.col(first + k);
+        }
+      }
+    }
+
     const F& f_;
     const size_t n_;
     const size_t p_;
@@ -268,6 +359,8 @@ namespace dsolve {
     const bool lag_derivatives_;
     std::ostream* msgs_;
     const PMXDdeRhs* rhs_;
+    /// the autodiff columns of a user Jacobian's argument block: theta's
+    std::vector<size_t> theta_columns_;
   };
 
 }

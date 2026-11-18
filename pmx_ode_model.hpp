@@ -24,9 +24,37 @@ namespace torsten {
    */
   template<typename F>
   struct PMXOdeFunctorRateAdaptor {
+    /// whether f provides a user Jacobian, see <code>jacobian</code>
+    static constexpr bool has_user_jacobian = pmx_has_user_jacobian<F>::value;
+
     F const& f_;
 
     PMXOdeFunctorRateAdaptor(F const& f) : f_(f) {}
+
+    /**
+     * Jacobian at doubles in the layout of this functor's arguments,
+     * N x (N + size(theta) + size(rate) + size(x_r)): f's Jacobian with
+     * an identity block for the rates, which are added to f.
+     */
+    template <typename F0 = F, std::enable_if_t<pmx_has_user_jacobian<F0>::value>* = nullptr>
+    Eigen::MatrixXd jacobian(double t, const Eigen::VectorXd& y,
+                             std::ostream* msgs,
+                             const std::vector<double>& theta,
+                             const std::vector<double>& rate,
+                             const std::vector<double>& x_r,
+                             const std::vector<int>& x_i) const {
+      const Eigen::MatrixXd jac_f = f_.jacobian(t, y, msgs, theta, x_r, x_i);
+      const Eigen::Index n = y.size();
+      const Eigen::Index n_theta = theta.size();
+      const Eigen::Index n_rate = rate.size();
+      Eigen::MatrixXd jac = Eigen::MatrixXd::Zero(n, n + n_theta + n_rate + x_r.size());
+      jac.leftCols(n + n_theta) = jac_f.leftCols(n + n_theta);
+      for (Eigen::Index i = 0; i < std::min(n, n_rate); ++i) {
+        jac.coeffRef(i, n + n_theta + i) = 1.0;
+      }
+      jac.rightCols(x_r.size()) = jac_f.rightCols(x_r.size());
+      return jac;
+    }
 
     /**
      * Evaluate ODE functor, and add rate.

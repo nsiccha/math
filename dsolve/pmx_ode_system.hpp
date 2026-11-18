@@ -11,6 +11,7 @@
 #include <stan/math/torsten/dsolve/ode_tuple_functor.hpp>
 #include <stan/math/torsten/dsolve/ode_check.hpp>
 #include <stan/math/torsten/dsolve/pmx_ode_vars.hpp>
+#include <stan/math/torsten/dsolve/pmx_user_jacobian.hpp>
 #include <stan/math/torsten/meta/is_std_ode.hpp>
 #include <stan/math/torsten/meta/is_eigen_ode.hpp>
 #include <stan/math/torsten/value_of.hpp>
@@ -354,6 +355,9 @@ namespace dsolve {
     static constexpr bool is_var_y0  = stan::is_var<T_init>::value;
     static constexpr bool is_var_par = stan::is_var<stan::return_type_t<T_par...>>::value;
     static constexpr bool use_fwd_sens = is_var_y0 || is_var_par;
+    /// whether f provides its Jacobian (a <code>PMXJacobianPair</code> inside),
+    /// used in place of nested autodiff
+    static constexpr bool use_user_jacobian = pmx_has_user_jacobian<F>::value;
 
     const double t0_;
     const std::vector<Tt>& ts_;
@@ -368,6 +372,12 @@ namespace dsolve {
     std::vector<double> y0_fwd_system; // internally we use std::vector
     Eigen::VectorXd y_work, dydt_work, g_work;
     stan::math::vector_v yv_work, fyv_work;
+    /// number of real scalars of the arguments: the columns of the
+    /// argument block of a user Jacobian
+    size_t num_arg_columns_;
+    /// for the k-th autodiff scalar of the arguments, its column in the
+    /// argument block of a user Jacobian
+    std::vector<size_t> var_columns_;
 
     PMXVariadicOdeSystem(const F& f,
                          double t0,
@@ -394,7 +404,9 @@ namespace dsolve {
         dydt_work(system_size),
         g_work(is_var_par? M : 0),
         yv_work((is_var_y0 || is_var_par)? N : 0),
-        fyv_work((is_var_y0 || is_var_par)? N : 0)
+        fyv_work((is_var_y0 || is_var_par)? N : 0),
+        num_arg_columns_(0),
+        var_columns_(user_jacobian_var_columns(num_arg_columns_, args...))
     {
       const char* caller = "PMX Variadic ODE System";
       torsten::dsolve::ode_check(y0_, t0_, ts_, caller, theta_ref_tuple_);
@@ -416,6 +428,48 @@ namespace dsolve {
 
     static state_t null_state(size_t n_size) {
       return Eigen::Matrix<scalar_t, -1, 1>::Zero(n_size);
+    }
+
+    /**
+     * Columns of the autodiff scalars of the arguments in the argument
+     * block of a user Jacobian (empty without one).
+     */
+    static std::vector<size_t> user_jacobian_var_columns(size_t& num_arg_columns,
+                                                         const T_par&... args) {
+      if constexpr (use_user_jacobian) {
+        return stan::math::internal::ode_jacobian_var_columns(num_arg_columns, args...);
+      } else {
+        num_arg_columns = 0;
+        return {};
+      }
+    }
+
+    /**
+     * The user's Jacobian at state y, N x (N + num_arg_columns_),
+     * [df/dy | df/dargs], when f provides it (<code>use_user_jacobian</code>).
+     */
+    inline Eigen::MatrixXd user_jacobian(double t, const Eigen::VectorXd& y) const {
+      return pmx_user_jacobian(static_cast<const std::tuple<T_par...>*>(nullptr),
+                               "PMX ODE user Jacobian", f_, t, std::forward_as_tuple(y),
+                               msgs_, theta_dbl_tuple_, num_arg_columns_, var_columns_);
+    }
+
+    /**
+     * Sensitivity right hand side from the user's Jacobian J at the state
+     * y(t): dS = J_y S, plus, for the k-th autodiff argument scalar, its
+     * column of J in sensitivity ns - M + k.
+     *
+     * @param jac user Jacobian
+     * @param sens N x ns sensitivities S
+     * @param dsens N x ns derivatives of the sensitivities, to fill
+     */
+    template <typename T_sens, typename T_dsens>
+    inline void user_jacobian_sens_rhs(const Eigen::MatrixXd& jac, const T_sens& sens,
+                                       T_dsens&& dsens) const {
+      dsens.noalias() = jac.leftCols(N) * sens;
+      for (size_t k = 0; k < M; ++k) {
+        dsens.col(ns - M + k) += jac.col(N + var_columns_[k]);
+      }
     }
 
     /*
@@ -496,6 +550,15 @@ namespace dsolve {
         return;
       }
 
+      if constexpr (use_user_jacobian) {
+        const Eigen::VectorXd y_state = y.head(N);
+        dydt.head(N) = dbl_rhs_impl(t, y_state);
+        user_jacobian_sens_rhs(user_jacobian(t, y_state),
+                               Eigen::Map<const Eigen::MatrixXd>(y.data() + N, N, ns),
+                               Eigen::Map<Eigen::MatrixXd>(dydt.data() + N, N, ns));
+        return;
+      }
+
       dydt.fill(0.0);
       stan::math::nested_rev_autodiff nested;
 
@@ -544,6 +607,20 @@ namespace dsolve {
       using stan::math::var;
       using stan::math::vector_v;
       using stan::math::vector_d;
+
+      if constexpr (use_user_jacobian) {
+        const Eigen::MatrixXd jac = user_jacobian(t, Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(nv_y), N));
+        Eigen::MatrixXd sens(N, ns);
+        for (int i = 0; i < ns; ++i) {
+          sens.col(i) = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(ys[i]), N);
+        }
+        Eigen::MatrixXd dsens(N, ns);
+        user_jacobian_sens_rhs(jac, sens, dsens);
+        for (int i = 0; i < ns; ++i) {
+          Eigen::Map<Eigen::VectorXd>(NV_DATA_S(ysdot[i]), N) = dsens.col(i);
+        }
+        return;
+      }
 
       // initialize ysdot
       for (int i = 0; i < ns; ++i) N_VConst(0.0, ysdot[i]);
@@ -625,6 +702,17 @@ namespace dsolve {
      */
     inline void jac(double t, N_Vector& nv_y, N_Vector& fy, SUNMatrix& J) {
       using stan::math::vector_v;
+
+      if constexpr (use_user_jacobian) {
+        const Eigen::MatrixXd jac_user
+            = user_jacobian(t, Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(nv_y), N));
+        for (int j = 0; j < N; ++j) {
+          for (int i = 0; i < N; ++i) {
+            SM_ELEMENT_D(J, i, j) = jac_user.coeff(i, j);
+          }
+        }
+        return;
+      }
 
       stan::math::nested_rev_autodiff nested;
 
