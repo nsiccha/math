@@ -2,6 +2,7 @@
 #define STAN_MATH_REV_FUNCTOR_COUPLED_DDE_SYSTEM_HPP
 
 #include <stan/math/prim/functor/coupled_dde_system.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/rev/core.hpp>
 #include <stan/math/rev/fun/value_of.hpp>
@@ -224,6 +225,134 @@ struct coupled_dde_system_impl<false, F, T_y0, T_tau, Args...> {
    * identity for the sensitivities with respect to the initial state and
    * zero for the other sensitivities.
    */
+  Eigen::VectorXd initial_state() const {
+    Eigen::VectorXd initial = Eigen::VectorXd::Zero(size());
+    for (size_t i = 0; i < N_; i++) {
+      initial.coeffRef(i) = value_of(y0_.coeff(i));
+    }
+    for (size_t i = 0; i < num_y0_vars_; i++) {
+      initial.coeffRef(N_ + i * N_ + i) = 1.0;
+    }
+    return initial;
+  }
+};
+
+/**
+ * The coupled DDE system when the initial state, the delays or the extra
+ * arguments contain autodiff variables and the user supplied the Jacobian
+ * of the right-hand side (see <code>internal::ode_jacobian_pair</code>).
+ *
+ * <p>The coupled state and the sensitivity equation are those of the
+ * autodiff specialization; the Jacobian blocks J_y, J_{lag,j} and
+ * df/dtheta come from the user Jacobian, evaluated in doubles, an
+ * N x (N + N D + P) matrix [df/dy | df/dy_lag(:, 1) | ... |
+ * df/dy_lag(:, D) | df/dargs], instead of nested reverse-mode autodiff.
+ *
+ * @tparam F base DDE right hand side functor
+ * @tparam FJac Jacobian functor; takes the same arguments as F
+ * @tparam T_y0 scalar type of the initial state
+ * @tparam T_tau type of the delay vector
+ * @tparam Args types of the extra arguments of F
+ */
+template <typename F, typename FJac, typename T_y0, typename T_tau,
+          typename... Args>
+struct coupled_dde_system_impl<false, internal::ode_jacobian_pair<F, FJac>,
+                               T_y0, T_tau, Args...> {
+  const internal::ode_jacobian_pair<F, FJac>& f_;
+  const Eigen::Matrix<T_y0, Eigen::Dynamic, 1>& y0_;
+  std::tuple<plain_type_t<decltype(value_of(std::declval<const Args&>()))>...>
+      value_of_args_tuple_;
+  const size_t num_y0_vars_;
+  const size_t num_args_vars_;
+  const size_t num_tau_vars_;
+  const size_t N_;
+  const size_t D_;
+  size_t num_arg_columns_;
+  const std::vector<size_t> var_columns_;
+  std::ostream* msgs_;
+
+  coupled_dde_system_impl(const internal::ode_jacobian_pair<F, FJac>& f,
+                          const Eigen::Matrix<T_y0, Eigen::Dynamic, 1>& y0,
+                          const T_tau& tau, std::ostream* msgs,
+                          const Args&... args)
+      : f_(f),
+        y0_(y0),
+        value_of_args_tuple_(value_of(args)...),
+        num_y0_vars_(count_vars(y0_)),
+        num_args_vars_(count_vars(args...)),
+        num_tau_vars_(count_vars(tau)),
+        N_(y0.size()),
+        D_(tau.size()),
+        num_arg_columns_(0),
+        var_columns_(
+            internal::ode_jacobian_var_columns(num_arg_columns_, args...)),
+        msgs_(msgs) {}
+
+  /**
+   * Calculates the right hand side of the coupled DDE system; see the
+   * autodiff specialization for the arguments.
+   */
+  void operator()(double t, const Eigen::VectorXd& z,
+                  const Eigen::MatrixXd& z_lag,
+                  const Eigen::MatrixXd& z_lag_deriv, Eigen::VectorXd& dz_dt) {
+    dz_dt.resize(size());
+    const Eigen::VectorXd y = z.head(N_);
+    const Eigen::MatrixXd y_lag = z_lag.topRows(N_);
+    const Eigen::VectorXd f_y_t = math::apply(
+        [&](auto&&... args) { return f_(t, y, y_lag, msgs_, args...); },
+        value_of_args_tuple_);
+    check_size_match("coupled_dde_system", "dy_dt", f_y_t.size(), "states", N_);
+    dz_dt.head(N_) = f_y_t;
+    const size_t num_params = num_y0_vars_ + num_args_vars_ + num_tau_vars_;
+    if (num_params == 0) {
+      return;
+    }
+    const Eigen::MatrixXd jac = math::apply(
+        [&](auto&&... args) {
+          return f_.jacobian(t, y, y_lag, msgs_, args...);
+        },
+        value_of_args_tuple_);
+    check_size_match("coupled_dde_system", "rows of the Jacobian", jac.rows(),
+                     "states", N_);
+    check_size_match("coupled_dde_system", "columns of the Jacobian",
+                     jac.cols(),
+                     "states times (1 + delays) plus argument scalars",
+                     N_ * (1 + D_) + num_arg_columns_);
+    Eigen::Map<const Eigen::MatrixXd> S(z.data() + N_, N_, num_params);
+    Eigen::Map<Eigen::MatrixXd> dS(dz_dt.data() + N_, N_, num_params);
+    dS.noalias() = jac.leftCols(N_) * S;
+    for (size_t j = 0; j < D_; ++j) {
+      const auto jac_lag = jac.middleCols(N_ * (1 + j), N_);
+      dS.noalias() += jac_lag
+                      * Eigen::Map<const Eigen::MatrixXd>(
+                          z_lag.col(j).data() + N_, N_, num_params);
+    }
+    for (size_t k = 0; k < num_args_vars_; ++k) {
+      dS.col(num_y0_vars_ + k) += jac.col(N_ * (1 + D_) + var_columns_[k]);
+    }
+    for (size_t j = 0; j < num_tau_vars_; ++j) {
+      dS.col(num_y0_vars_ + num_args_vars_ + j).noalias()
+          -= jac.middleCols(N_ * (1 + j), N_) * z_lag_deriv.col(j);
+    }
+  }
+
+  size_t size() const {
+    return N_ + N_ * (num_y0_vars_ + num_args_vars_ + num_tau_vars_);
+  }
+
+  size_t num_states() const { return N_; }
+
+  Eigen::MatrixXd delay_sensitivities() const {
+    Eigen::MatrixXd dtau = Eigen::MatrixXd::Zero(
+        num_y0_vars_ + num_args_vars_ + num_tau_vars_, D_);
+    for (size_t j = 0; j < num_tau_vars_; ++j) {
+      dtau(num_y0_vars_ + num_args_vars_ + j, j) = 1;
+    }
+    return dtau;
+  }
+
+  size_t num_lag_derivatives() const { return num_tau_vars_ > 0 ? N_ : 0; }
+
   Eigen::VectorXd initial_state() const {
     Eigen::VectorXd initial = Eigen::VectorXd::Zero(size());
     for (size_t i = 0; i < N_; i++) {
