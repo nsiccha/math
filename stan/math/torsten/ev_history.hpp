@@ -376,10 +376,11 @@ namespace torsten {
    * @tparam T2 RATE type
    * @tparam T3 II type
    * @tparam T_lag LAG time type
+   * @tparam T_biovar bioavailability type, which sets infusion durations
    */
-  template<typename T0, typename T1, typename T2, typename T3, typename T_lag>
+  template<typename T0, typename T1, typename T2, typename T3, typename T_lag, typename T_biovar>
   struct EventHistory {
-    using T_time = typename stan::return_type_t<T0, T1, T2, T3, T_lag>;
+    using T_time = typename stan::return_type_t<T0, T1, T2, T3, T_lag, T_biovar>;
     using Param = std::pair<double, std::array<int, 3> >;
     using rate_t = std::pair<double, std::vector<T2> >;
 
@@ -625,18 +626,33 @@ namespace torsten {
      * Generate end-of-infusion event to indicate the range of the infusion.
      * The new event has a special EVID = 9 and it introduces no action.
      *
+     * An infusion keeps its RATE, and the bioavailability F of the dose
+     * sets its duration F * AMT / RATE, so it delivers F * AMT (NONMEM's
+     * convention). Steady-state dosing infuses F * AMT at RATE as well, so
+     * the steady state is the limit of the transient regimen.
+     *
+     * @tparam F_t type of the bioavailability functor
      * @param nCmt nb of compartments for the model
+     * @param dose_biovar <code>dose_biovar(i)</code> is the bioavailability
+     *   of dosing event <code>i</code> in its dosing compartment
      */
-    void generate_rates(int nCmt) {
+    template<typename F_t>
+    void generate_rates(int nCmt, const F_t& dose_biovar) {
       using std::vector;
       using stan::math::value_of;
+
+      // window, compartment and rate of each infusion
+      struct infusion_t { double t0; double t1; int cmt; T2 rate; };
+      std::vector<infusion_t> infusions;
 
       const int n = size();
       for (size_t i = 0; i < n; ++i) {
         if ((is_dosing(i)) && (rate(i) > 0 && amt(i) > 0)) {
+          const T_time t_end = time(i) + dose_biovar(i) * amt(i) / rate(i);
+          infusions.push_back({value_of(time(i)), value_of(t_end), cmt(i), rate(i)});
           insert_event(i);
           idx.back()[2] = 9;    // set evid to a special type "9"
-          gen_time. back() += amt(i)/rate(i);
+          gen_time. back() = t_end;
           gen_amt.  back() = 0;
           gen_rate. back() = 0;
           gen_ii.   back() = 0;
@@ -658,14 +674,10 @@ namespace torsten {
           return a.first < b.first;
         });
 
-      for (size_t i = 0; i < size(); ++i) {
-        if ((is_dosing(i)) && (rate(i) > 0 && amt(i) > 0)) {
-          double t0 = value_of(time(i));
-          double t1 = t0 + value_of(amt(i)/rate(i));
-          for (auto&& r : rates) {
-            if (r.first > t0 && r.first <= t1) {
-              r.second[cmt(i) - 1] += rate(i);
-            }
+      for (const infusion_t& infusion : infusions) {
+        for (auto&& r : rates) {
+          if (r.first > infusion.t0 && r.first <= infusion.t1) {
+            r.second[infusion.cmt - 1] += infusion.rate;
           }
         }
       }

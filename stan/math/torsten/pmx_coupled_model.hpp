@@ -236,15 +236,19 @@ namespace torsten {
                const std::vector<T1>& rate,
                const integrator_type& integrator) const {
       const double t0_d = stan::math::value_of(t0);
-      // std::vector<Tt1> ts(time_step(t0, t1));
-      // PMXOdeFunctorRateAdaptor<F> f_rate;
       const int nPK = T_m<T_par>::Ncmt;
       Eigen::Matrix<T, -1, 1> y_pk(y.head(nPK));
       Eigen::Matrix<T, -1, 1> y_pd(y.tail(n_ode_));
       const double dt_min = 1.e-12;
       if (t1 - t0 > dt_min) {
         PMXOdeFunctorCouplingAdaptor<T_m, F> f(f_);
-        y_pd = integrator(f, y_pd, t0_d, t1, par_, rate, t0, y_pk, x_r_, x_i_);
+        // Integrate over [t0_d, t0_d + (t1 - t0)], with the PK solution
+        // taken relative to t0_d, as PKODEModel::time_step does: a
+        // parameter-dependent start time t0 (a lag time, or the end of an
+        // infusion, which bioavailability sets) then enters through the
+        // step length, and its sensitivity is not dropped.
+        const auto t1_step = t0_d + (t1 - t0);
+        y_pd = integrator(f, y_pd, t0_d, t1_step, par_, rate, t0_d, y_pk, x_r_, x_i_);
         T_m<T_par> pk_model(par_);
         std::vector<T1> ratePK(rate.begin(), rate.begin() + nPK);
         pk_model.solve(y_pk, t0, t1, ratePK);
