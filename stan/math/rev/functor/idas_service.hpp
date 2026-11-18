@@ -65,6 +65,9 @@ struct idas_service {
     CHECK_IDAS_CALL(IDAInit(mem, dae_type::idas_res, t0, nv_yy, nv_yp));
     CHECK_IDAS_CALL(IDASetUserData(mem, static_cast<void*>(&dae)));
     CHECK_IDAS_CALL(IDASetLinearSolver(mem, LS, A));
+    if constexpr (dae_type::has_user_jacobian) {
+      CHECK_IDAS_CALL(IDASetJacFn(mem, dae_type::idas_jac));
+    }
 
     idas_sens_init(nv_yys, nv_yps, ns, n);
   }

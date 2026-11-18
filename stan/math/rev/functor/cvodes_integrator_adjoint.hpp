@@ -4,6 +4,8 @@
 #include <stan/math/rev/meta.hpp>
 #include <stan/math/rev/core/save_varis.hpp>
 #include <stan/math/rev/functor/cvodes_utils.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
 #include <stan/math/rev/functor/ode_store_sensitivities.hpp>
 #include <stan/math/prim/err.hpp>
 #include <stan/math/prim/fun/value_of.hpp>
@@ -101,6 +103,10 @@ class cvodes_integrator_adjoint_vari : public vari_base {
     const std::tuple<
         promote_scalar_t<partials_type_t<scalar_type_t<T_Args>>, T_Args>...>
         value_of_args_tuple_;
+    // with a user Jacobian (see internal::ode_jacobian_pair): the number of
+    // its argument columns and the columns of the autodiff arguments
+    size_t jac_num_arg_columns_{0};
+    std::vector<size_t> jac_var_columns_;
 
     template <typename FF>
     cvodes_solver(const char* function_name, FF&& f, size_t N, const T_y0& y0,
@@ -146,6 +152,10 @@ class cvodes_integrator_adjoint_vari : public vari_base {
           value_of_args_tuple_(value_of(args)...) {
       if (cvodes_mem_ == nullptr) {
         throw std::runtime_error("CVodeCreate failed to allocate memory");
+      }
+      if constexpr (internal::is_ode_jacobian_pair<std::decay_t<F>>::value) {
+        jac_var_columns_
+            = internal::ode_jacobian_var_columns(jac_num_arg_columns_, args...);
       }
     }
 
@@ -572,6 +582,23 @@ class cvodes_integrator_adjoint_vari : public vari_base {
   }
 
   /**
+   * Evaluate the user Jacobian (see internal::ode_jacobian_pair) at (t, y)
+   * and check its size.
+   *
+   * @return N x (N + P) Jacobian with respect to the state and to every
+   *   real scalar of the variadic arguments
+   */
+  inline Eigen::MatrixXd user_jacobian(double t, N_Vector y) const {
+    const Eigen::VectorXd y_vec
+        = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(y), N_);
+    return internal::eval_user_jacobian(
+        static_cast<std::tuple<T_Args...>*>(nullptr),
+        solver_->function_name_str_.c_str(), solver_->f_, t, std::tie(y_vec),
+        msgs_, solver_->value_of_args_tuple_, solver_->jac_num_arg_columns_,
+        solver_->jac_var_columns_);
+  }
+
+  /**
    * Implements the function of type CVRhsFn which is the user-defined
    * ODE RHS passed to CVODES.
    */
@@ -592,6 +619,13 @@ class cvodes_integrator_adjoint_vari : public vari_base {
    * @param[out] yBdot evaluation of adjoint ODE RHS
    */
   inline int rhs_adj(double t, N_Vector y, N_Vector yB, N_Vector yBdot) const {
+    if constexpr (internal::is_ode_jacobian_pair<std::decay_t<F>>::value) {
+      const Eigen::MatrixXd jac = user_jacobian(t, y);
+      Eigen::Map<Eigen::VectorXd>(NV_DATA_S(yBdot), N_).noalias()
+          = -jac.leftCols(N_).transpose()
+            * Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yB), N_);
+      return 0;
+    }
     const nested_rev_autodiff nested;
 
     Eigen::Matrix<var, Eigen::Dynamic, 1> y_vars(
@@ -627,6 +661,15 @@ class cvodes_integrator_adjoint_vari : public vari_base {
    * @param[out] qBdot evaluation of adjoint ODE quadrature RHS
    */
   inline int quad_rhs_adj(double t, N_Vector y, N_Vector yB, N_Vector qBdot) {
+    if constexpr (internal::is_ode_jacobian_pair<std::decay_t<F>>::value) {
+      const Eigen::MatrixXd jac = user_jacobian(t, y);
+      Eigen::Map<const Eigen::VectorXd> yB_vec(NV_DATA_S(yB), N_);
+      double* qBdot_data = NV_DATA_S(qBdot);
+      for (size_t s = 0; s < solver_->jac_var_columns_.size(); ++s) {
+        qBdot_data[s] = -jac.col(N_ + solver_->jac_var_columns_[s]).dot(yB_vec);
+      }
+      return 0;
+    }
     Eigen::Map<const Eigen::VectorXd> y_vec(NV_DATA_S(y), N_);
     const nested_rev_autodiff nested;
 
@@ -664,6 +707,10 @@ class cvodes_integrator_adjoint_vari : public vari_base {
    */
   inline int jacobian_rhs_states(double t, N_Vector y, SUNMatrix J) const {
     Eigen::Map<Eigen::MatrixXd> Jfy(SM_DATA_D(J), N_, N_);
+    if constexpr (internal::is_ode_jacobian_pair<std::decay_t<F>>::value) {
+      Jfy = user_jacobian(t, y).leftCols(N_);
+      return 0;
+    }
 
     nested_rev_autodiff nested;
 

@@ -11,6 +11,9 @@
 #include <stan/math/prim/fun/value_of.hpp>
 #include <stan/math/prim/functor/for_each.hpp>
 #include <stan/math/prim/functor/apply.hpp>
+#include <stan/math/prim/functor/ode_jacobian_pair.hpp>
+#include <stan/math/rev/functor/ode_user_jacobian.hpp>
+#include <sunmatrix/sunmatrix_dense.h>
 #include <idas/idas.h>
 #include <nvector/nvector_serial.h>
 #include <ostream>
@@ -62,6 +65,15 @@ class dae_system {
   static constexpr bool is_var_par
       = stan::is_var<return_type_t<T_par...>>::value;
   static constexpr bool use_fwd_sens = is_var_yy0 || is_var_yp0 || is_var_par;
+  /**
+   * Whether the residual comes with a user Jacobian (see
+   * internal::ode_jacobian_pair), an N x (2N + P) matrix
+   * [dF/dyy, dF/dyp, dF/dargs].
+   */
+  static constexpr bool has_user_jacobian
+      = internal::is_ode_jacobian_pair<F>::value;
+  size_t jac_num_arg_columns_;
+  std::vector<size_t> jac_var_columns_;
 
   using scalar_t = stan::return_type_t<Tyy, Typ, T_par...>;
   using return_t = std::vector<Eigen::Matrix<scalar_t, -1, 1>>;
@@ -94,7 +106,12 @@ class dae_system {
         ns((is_var_yy0 ? N : 0) + (is_var_yp0 ? N : 0) + M),
         varis(ChainableStack::instance_->memalloc_.alloc_array<vari*>(ns)),
         all_vars(ns),
-        dbl_rr(N) {
+        dbl_rr(N),
+        jac_num_arg_columns_(0) {
+    if constexpr (has_user_jacobian) {
+      jac_var_columns_
+          = internal::ode_jacobian_var_columns(jac_num_arg_columns_, args...);
+    }
     save_varis(varis, yy0, yp0, args...);
     for (int i = 0; i < ns; ++i) {
       all_vars[i].vi_ = *(varis + i);
@@ -122,6 +139,37 @@ class dae_system {
   }
 
   /**
+   * Evaluate the user Jacobian at (t, yy, yp) and check its size.
+   *
+   * @return N x (2N + P) matrix [dF/dyy, dF/dyp, dF/dargs]
+   */
+  Eigen::MatrixXd user_jacobian(double t, N_Vector yy, N_Vector yp) const {
+    const Eigen::VectorXd yy_vec
+        = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yy), N);
+    const Eigen::VectorXd yp_vec
+        = Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yp), N);
+    return internal::eval_user_jacobian(
+        static_cast<std::tuple<T_par...>*>(nullptr), "dae_system", f_, t,
+        std::tie(yy_vec, yp_vec), msgs_, dbl_args_tuple_, jac_num_arg_columns_,
+        jac_var_columns_);
+  }
+
+  /**
+   * Implements the IDALsJacFn function for the Jacobian of the Newton
+   * iteration, dF/dyy + cj dF/dyp, from the user Jacobian.
+   */
+  static int idas_jac(double t, double cj, N_Vector yy, N_Vector yp,
+                      N_Vector rr, SUNMatrix J, void* user_data, N_Vector temp1,
+                      N_Vector temp2, N_Vector temp3) {
+    dae_type* dae = static_cast<dae_type*>(user_data);
+    const size_t n = dae->N;
+    const Eigen::MatrixXd jac = dae->user_jacobian(t, yy, yp);
+    Eigen::Map<Eigen::MatrixXd>(SM_DATA_D(J), n, n)
+        = jac.leftCols(n) + cj * jac.middleCols(n, n);
+    return 0;
+  }
+
+  /**
    * Evaluate DAE sensitivity residual according to IDAS signature
    */
   static int idas_sens_res(int ns, double t, N_Vector yy, N_Vector yp,
@@ -132,6 +180,22 @@ class dae_system {
 
     const int n = dae->N;
     const int m = dae->M;
+    if constexpr (has_user_jacobian) {
+      // F_yy s + F_yp s' (+ F_arg for an argument's sensitivity)
+      const Eigen::MatrixXd jac = dae->user_jacobian(t, yy, yp);
+      for (int j = 0; j < ns; ++j) {
+        Eigen::Map<Eigen::VectorXd> ress_j(NV_DATA_S(ress[j]), n);
+        ress_j.noalias()
+            = jac.leftCols(n)
+                  * Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yys[j]), n)
+              + jac.middleCols(n, n)
+                    * Eigen::Map<const Eigen::VectorXd>(NV_DATA_S(yps[j]), n);
+        if (j >= ns - m) {
+          ress_j += jac.col(2 * n + dae->jac_var_columns_[j - (ns - m)]);
+        }
+      }
+      return 0;
+    }
 
     for (int i = 0; i < ns; ++i) {
       N_VConst(0.0, ress[i]);
