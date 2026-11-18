@@ -124,7 +124,8 @@ struct TorstenPMXTest<child_type<T> > : public testing::Test {
   template<typename solver_func_t, typename child_test_t,
            stan::require_any_t<std::is_same<solver_func_t, pmx_solve_adams_functor>,
                                std::is_same<solver_func_t, pmx_solve_bdf_functor>,
-                               std::is_same<solver_func_t, pmx_solve_rk45_functor> >* = nullptr>
+                               std::is_same<solver_func_t, pmx_solve_rk45_functor>,
+                               std::is_same<solver_func_t, pmx_solve_dde_rk45_lag_free_functor> >* = nullptr>
   auto apply_solver(solver_func_t const& sol, child_test_t* test_ptr) {
     typename child_test_t::ode_t f;
     return sol(f, ncmt, time, amt, rate, ii, evid, cmt, addl, ss,
@@ -292,7 +293,8 @@ struct TorstenPMXTest<child_type<T> > : public testing::Test {
   template<typename x_type, typename solver_func_t,                     \
            stan::require_any_t<std::is_same<solver_func_t, pmx_solve_adams_functor>, \
                                std::is_same<solver_func_t, pmx_solve_bdf_functor>, \
-                               std::is_same<solver_func_t, pmx_solve_rk45_functor> >* = nullptr> \
+                               std::is_same<solver_func_t, pmx_solve_rk45_functor>, \
+                               std::is_same<solver_func_t, pmx_solve_dde_rk45_lag_free_functor> >* = nullptr> \
   auto test_func_##NAME##_impl(x_type const& x, solver_func_t const& s) { \
     ode_t f;                                                            \
     return s(f, ncmt, __VA_ARGS__, rtol, atol, max_num_steps, as_rtol, as_atol, as_max_num_steps, msgs); \
@@ -439,7 +441,8 @@ struct TorstenPMXTest<child_type<T> > : public testing::Test {
   template<typename solver_func_t,
            stan::require_any_t<std::is_same<solver_func_t, pmx_solve_rk45_functor>,
                                std::is_same<solver_func_t, pmx_solve_adams_functor>,
-                               std::is_same<solver_func_t, pmx_solve_bdf_functor>>* = nullptr>
+                               std::is_same<solver_func_t, pmx_solve_bdf_functor>,
+                               std::is_same<solver_func_t, pmx_solve_dde_rk45_lag_free_functor>>* = nullptr>
   void compare_overload_impl(solver_func_t const& s, double tol) {
     ode_t f;
     auto x0 = s(f, ncmt, time, amt, rate, ii, evid, cmt, addl, ss, theta, biovar, tlag, nullptr);
@@ -473,7 +476,8 @@ struct TorstenPMXTest<child_type<T> > : public testing::Test {
   template<typename solver_func_t,
            stan::require_any_t<std::is_same<solver_func_t, pmx_solve_rk45_functor>,
                                std::is_same<solver_func_t, pmx_solve_adams_functor>,
-                               std::is_same<solver_func_t, pmx_solve_bdf_functor>>* = nullptr>
+                               std::is_same<solver_func_t, pmx_solve_bdf_functor>,
+                               std::is_same<solver_func_t, pmx_solve_dde_rk45_lag_free_functor>>* = nullptr>
   void compare_param_overload_impl(solver_func_t const& s, double tol) {
     ode_t f;
     auto x0 = s(f, ncmt, time, amt, rate, ii, evid, cmt, addl, ss, theta, biovar, tlag, nullptr);
