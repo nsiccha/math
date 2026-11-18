@@ -371,6 +371,29 @@ namespace torsten {
                               ctrl...);
   }
 
+  /**
+   * Overload taking the Jacobian of the right hand side, used in place of
+   * nested autodiff in the forward sensitivity equations and in the
+   * implicit-function-theorem derivatives of a constant-infusion steady
+   * state. The remaining arguments are those of any overload without
+   * @c jac.
+   *
+   * @param f right hand side, f(t, y, y_lag, theta, x_r, x_i, msgs)
+   * @param jac Jacobian of f, taking f's arguments and returning the
+   *   nCmt x (nCmt + nCmt D + P) matrix
+   *   [df/dy | df/dy_lag(:, 1) ... df/dy_lag(:, D) | df/dtheta | df/dx_r],
+   *   where D = size(tau) and P = size(theta) + size(x_r) for the parameter
+   *   row and data row of the current event. The x_r columns are never read.
+   * @param nCmt number of compartments
+   */
+  template <typename F, typename FJac, typename... Args,
+            stan::require_not_arithmetic_t<FJac>* = nullptr>
+  auto pmx_solve_dde_rk45(const F& f, const FJac& jac, const int nCmt,
+                          const Args&... args) {
+    const PMXJacobianPair<F, FJac> f_jac(f, jac);
+    return pmx_solve_dde_rk45(f_jac, nCmt, args...);
+  }
+
 }
 
 #endif
