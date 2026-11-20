@@ -3,14 +3,14 @@
   "line": {
     "repo": "nsiccha/math",
     "ref": "dogfood",
-    "sha": "4d8524e95e3d171a8cb59957a65ca4f8a6a9a259"
+    "sha": "74d1813da60169ccf55206f8fcce2fcb2857ad8f"
   },
   "upstream": {
     "repo": "stan-dev/math",
     "ref": "develop",
     "sha": "a1810b7792bb61ecdb93f511a19cafe6d52beda2"
   },
-  "prepared_at": "2026-11-18T19:58:28Z",
+  "prepared_at": "2026-11-20T09:06:31Z",
   "problems": [
     {
       "id": "dde-core",
@@ -762,6 +762,61 @@
           ],
           "result": "passed",
           "detail": "6 tests passed. DDE values and gradients agree with nested autodiff over transient and steady-state schedules, including delayed feedback. The largest gradient difference divided by (1 + |autodiff gradient|) was 3.33e-13. The autodiff check rejects a scaled Jacobian."
+        }
+      ]
+    },
+    {
+      "id": "tape-memory-release",
+      "role": "shared",
+      "title": "Hand a thread's reverse-mode memory back to the operating system",
+      "summary": "Feature. recover_memory() keeps every block of the autodiff arena and the storage of the variable lists, so a long-lived thread holds the memory of its largest gradient for as long as it lives. The C++ functions release_memory() and stack_alloc::release_pages() hand that physical memory back to the system while keeping it allocated for the next gradient. BridgeStan's bs_release_memory calls them.",
+      "repairs": [],
+      "upstream_refs": [],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "d395313f4e000d8ce4ebab52ecc7cfe126f32e9a",
+            "title": "Add release_memory() to hand a thread's autodiff memory back to the system",
+            "original": [
+              "d395313f4e000d8ce4ebab52ecc7cfe126f32e9a"
+            ]
+          }
+        ],
+        "why_together": "One commit: the arena method, the thread-level entry point and their tests."
+      },
+      "depends_on": [],
+      "requires": [],
+      "validation": [
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math 74d1813da60169ccf55206f8fcce2fcb2857ad8f (dogfood), Linux x86_64, GCC 15.2.0, C++17, -O3",
+          "tests": [
+            "test/unit/math/memory/stack_alloc_test.cpp",
+            "test/unit/math/rev/core/release_memory_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "13 and 3 tests passed. A released 64 MiB arena block has no resident pages and the process's resident memory falls by its size (93.2 to 26.1 MB), returning once the block is written again; a gradient's kept memory falls from 121.9 to 18.0 MB against a 14.0 MB baseline. Gradients after a release are bit-identical. A no-op release fails both residency tests."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math 74d1813da60169ccf55206f8fcce2fcb2857ad8f (dogfood), Linux x86_64, GCC 15.2.0, C++17, -O3, STAN_THREADS=true",
+          "tests": [
+            "test/unit/math/memory/stack_alloc_test.cpp",
+            "test/unit/math/rev/core/release_memory_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "13 and 4 tests passed. A worker thread releases its own stack while the main thread's stack is in use."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "Stan Math d395313f4e000d8ce4ebab52ecc7cfe126f32e9a, native macOS on Apple silicon, Apple clang, C++17, -O3, without and with STAN_THREADS",
+          "tests": [
+            "test/unit/math/memory/stack_alloc_test.cpp",
+            "test/unit/math/rev/core/release_memory_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "13 and 3 tests passed, 13 and 4 with STAN_THREADS, on the Mac run that gated this publication. There the residency tests measure the process's memory footprint (phys_footprint): it falls by the released block and gradient and rises again once the memory is written."
         }
       ]
     }
