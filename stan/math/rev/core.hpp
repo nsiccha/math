@@ -57,6 +57,7 @@
 #include <stan/math/rev/core/read_var.hpp>
 #include <stan/math/rev/core/recover_memory.hpp>
 #include <stan/math/rev/core/recover_memory_nested.hpp>
+#include <stan/math/rev/core/release_memory.hpp>
 #include <stan/math/rev/core/scoped_chainablestack.hpp>
 #include <stan/math/rev/core/set_zero_all_adjoints.hpp>
 #include <stan/math/rev/core/set_zero_all_adjoints_nested.hpp>
