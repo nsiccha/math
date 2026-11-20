@@ -10,6 +10,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 namespace stan {
 namespace math {
@@ -62,6 +66,57 @@ STAN_STRONG_INLINE char* align_up(char* ptr, size_t alignment) {
       = (address + alignment - 1) & ~static_cast<uintptr_t>(alignment - 1);
   return ptr + (aligned - address);
 }
+
+/**
+ * Hand the physical memory behind the whole pages inside
+ * `[ptr, ptr + bytes)` back to the operating system. The address range
+ * stays valid, readable and writable, and its next use gets fresh
+ * zero-filled pages, so the contents of these pages are lost. Bytes
+ * outside these whole pages, such as a memory allocator's bookkeeping next
+ * to an allocation, are not touched.
+ *
+ * On Linux the pages are discarded with `madvise(MADV_DONTNEED)`. On macOS
+ * they are replaced by fresh anonymous pages with `mmap(MAP_FIXED)`:
+ * `madvise(MADV_FREE_REUSABLE)`, the other way to discard pages there,
+ * would need a matching `madvise(MADV_FREE_REUSE)` before the pages are
+ * written again, or the process's memory footprint would leave them out.
+ *
+ * @param ptr Start of the range. The range must lie within one allocation
+ * of private, anonymous memory, such as a block from `malloc()`, whose
+ * contents are no longer needed.
+ * @param bytes Length of the range in bytes.
+ * @return `true` if the pages were handed back or the range holds no whole
+ * page, `false` if this platform offers no way to hand pages back (only
+ * Linux and macOS do) or the system call failed.
+ */
+inline bool release_whole_pages(void* ptr, size_t bytes) noexcept {
+#if defined(__linux__) || defined(__APPLE__)
+  static const int64_t page_size = sysconf(_SC_PAGESIZE);
+  if (page_size <= 0) {
+    return false;
+  }
+  const uintptr_t page = static_cast<uintptr_t>(page_size);
+  const uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+  const uintptr_t first = (start + page - 1) / page * page;
+  const uintptr_t last = (start + bytes) / page * page;
+  if (ptr == nullptr || last <= first) {
+    return true;
+  }
+  void* pages = reinterpret_cast<void*>(first);
+  const size_t length = last - first;
+#if defined(__APPLE__)
+  return mmap(pages, length, PROT_READ | PROT_WRITE,
+              MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0)
+         == pages;
+#else
+  return madvise(pages, length, MADV_DONTNEED) == 0;
+#endif
+#else
+  (void)ptr;
+  (void)bytes;
+  return false;
+#endif
+}
 }  // namespace internal
 
 /**
@@ -77,6 +132,9 @@ STAN_STRONG_INLINE char* align_up(char* ptr, size_t alignment) {
  * is twice as large as the previous one.  The memory may be
  * recovered, with the blocks being reused, or all blocks may be
  * freed, resetting the stack of blocks to its original state.
+ * Once recovered, the physical memory behind the blocks may also be
+ * handed back to the operating system while the blocks are kept, see
+ * release_pages().
  *
  * Every allocation is at least 8 byte aligned. Larger alignments can be
  * requested through the `alignment` argument of `alloc()`.
@@ -214,7 +272,7 @@ class stack_alloc {
    * Recover all the memory used by the stack allocator.  The stack
    * of memory blocks allocated so far will be available for further
    * allocations.  To free memory back to the system, use the
-   * function free_all().
+   * function free_all(), or release_pages() to keep the blocks.
    */
   inline void recover_all() {
     cur_block_ = 0;
@@ -265,6 +323,43 @@ class stack_alloc {
     sizes_.resize(1);
     blocks_.resize(1);
     recover_all();
+  }
+
+  /**
+   * Hand the physical memory behind all blocks back to the operating
+   * system while keeping the blocks themselves.
+   *
+   * recover_all() keeps every block for the next allocations, so the
+   * memory of the largest stack ever allocated stays charged to the
+   * process. free_all() returns the blocks to `free()`, which need not
+   * return them to the operating system. This function instead tells the
+   * operating system that the whole pages inside every block hold nothing
+   * worth keeping (see internal::release_whole_pages()). The blocks stay
+   * allocated, and later allocations reuse them as before; the first
+   * write to each page gets a fresh zero-filled page from the system.
+   *
+   * Nothing may be allocated: call recover_all() first, and do not call
+   * it while a nested allocation started by start_nested() is open.
+   *
+   * @return `true` if the memory of every block was handed back, `false`
+   * if this platform offers no way to do so (only Linux and macOS do) or a
+   * system call failed.
+   * @throw std::logic_error if memory is still allocated or a nested
+   * allocation is open; nothing is changed then.
+   */
+  inline bool release_pages() {
+    if (cur_block_ != 0 || next_loc_ != blocks_[0]
+        || !nested_cur_blocks_.empty()) {
+      throw std::logic_error(
+          "stack_alloc::release_pages(): memory is still allocated;"
+          " call recover_all() first");
+    }
+    bool released = true;
+    for (size_t i = 0; i < blocks_.size(); ++i) {
+      released
+          = internal::release_whole_pages(blocks_[i], sizes_[i]) && released;
+    }
+    return released;
   }
 
   /**
