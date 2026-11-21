@@ -4,7 +4,9 @@
 #include <stan/math/prim/meta.hpp>
 #include <stan/math/prim/err.hpp>
 #include <stan/math/prim/fun/log.hpp>
-#include <stan/math/prim/fun/sum.hpp>
+#include <stan/math/prim/fun/to_ref.hpp>
+#include <stan/math/prim/fun/value_of.hpp>
+#include <stan/math/prim/functor/partials_propagator.hpp>
 #include <cmath>
 #include <vector>
 
@@ -28,15 +30,30 @@ inline return_type_t<T_prob> categorical_lpmf(int n, const T_prob& theta) {
   return 0.0;
 }
 
+/** \ingroup multivar_dists
+ * Categorical log PMF summed over an array of outcomes,
+ * Categorical(ns | theta).
+ *
+ * The density reads only the observed entries of theta: an entry no
+ * outcome names gets a zero partial, also where it is exactly zero.
+ *
+ * @param ns Outcomes, each in 1:size(theta)
+ * @param theta Probabilities, a simplex
+ * @return log probability of the outcomes
+ * @throw std::domain_error if an outcome is not in 1:size(theta)
+ * @throw std::domain_error if theta is not a simplex
+ */
 template <bool propto, typename T_prob,
           require_eigen_col_vector_t<T_prob>* = nullptr>
 inline return_type_t<T_prob> categorical_lpmf(const std::vector<int>& ns,
                                               const T_prob& theta) {
+  using T_partials_return = partials_return_t<T_prob>;
   static constexpr const char* function = "categorical_lpmf";
 
   check_bounded(function, "element of outcome array", ns, 1, theta.size());
   ref_type_t<T_prob> theta_ref = theta;
-  check_simplex(function, "Probabilities parameter", value_of(theta_ref));
+  const auto& theta_val = to_ref(value_of(theta_ref));
+  check_simplex(function, "Probabilities parameter", theta_val);
 
   if constexpr (!include_summand<propto, T_prob>::value) {
     return 0.0;
@@ -46,15 +63,25 @@ inline return_type_t<T_prob> categorical_lpmf(const std::vector<int>& ns,
     return 0.0;
   }
 
-  Eigen::Matrix<value_type_t<T_prob>, Eigen::Dynamic, 1> log_theta
-      = log(theta_ref);
-  Eigen::Matrix<return_type_t<T_prob>, Eigen::Dynamic, 1> log_theta_ns(
-      ns.size());
-  for (size_t i = 0; i < ns.size(); ++i) {
-    log_theta_ns(i) = log_theta(ns[i] - 1);
+  // Count the outcomes per category and take the log of the observed
+  // entries only. The log of every entry would leave a log(0) node for an
+  // unobserved zero entry, whose reverse pass gives 0 / 0 = NaN.
+  Eigen::VectorXi counts = Eigen::VectorXi::Zero(theta.size());
+  for (int n : ns) {
+    ++counts.coeffRef(n - 1);
   }
 
-  return sum(log_theta_ns);
+  auto ops_partials = make_partials_propagator(theta_ref);
+  T_partials_return lp(0.0);
+  for (Eigen::Index k = 0; k < counts.size(); ++k) {
+    if (counts.coeff(k) > 0) {
+      lp += counts.coeff(k) * log(theta_val.coeff(k));
+      if constexpr (is_autodiff_v<T_prob>) {
+        partials<0>(ops_partials)[k] = counts.coeff(k) / theta_val.coeff(k);
+      }
+    }
+  }
+  return ops_partials.build(lp);
 }
 
 template <typename T_n, typename T_prob, require_st_integral<T_n>* = nullptr,
