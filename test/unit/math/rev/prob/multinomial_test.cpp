@@ -45,3 +45,23 @@ TEST_F(AgradRev, DistributionsMultinomial_check_varis_on_stack) {
   test::check_varis_on_stack(stan::math::multinomial_lpmf<false>(ns, theta));
   test::check_varis_on_stack(stan::math::multinomial_lpmf<true>(ns, theta));
 }
+
+// A category with a zero count does not enter the density, so a zero
+// probability there must get a zero gradient, not 0 * 0 / 0 = NaN.
+TEST_F(AgradRev, DistributionsMultinomial_zero_count_zero_prob) {
+  using Eigen::Dynamic;
+  using Eigen::Matrix;
+  using stan::math::var;
+  Matrix<var, Dynamic, 1> theta(3);
+  theta << 0.0, 0.6, 0.4;
+  std::vector<int> ns{0, 2, 3};
+
+  var lp = stan::math::multinomial_lpmf<false>(ns, theta);
+  lp.grad();
+  EXPECT_FLOAT_EQ(std::lgamma(6.0) - std::lgamma(3.0) - std::lgamma(4.0)
+                      + 2 * std::log(0.6) + 3 * std::log(0.4),
+                  lp.val());
+  EXPECT_EQ(0.0, theta(0).adj());
+  EXPECT_FLOAT_EQ(2 / 0.6, theta(1).adj());
+  EXPECT_FLOAT_EQ(3 / 0.4, theta(2).adj());
+}
