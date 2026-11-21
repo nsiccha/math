@@ -3,14 +3,14 @@
   "line": {
     "repo": "nsiccha/math",
     "ref": "dogfood",
-    "sha": "74d1813da60169ccf55206f8fcce2fcb2857ad8f"
+    "sha": "ed8059821a13821c646f66abfdd010a7758fa689"
   },
   "upstream": {
     "repo": "stan-dev/math",
     "ref": "develop",
-    "sha": "a1810b7792bb61ecdb93f511a19cafe6d52beda2"
+    "sha": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b"
   },
-  "prepared_at": "2026-11-20T09:06:31Z",
+  "prepared_at": "2026-11-21T11:34:02Z",
   "problems": [
     {
       "id": "dde-core",
@@ -189,6 +189,17 @@
           ],
           "result": "passed",
           "detail": "4 tests passed. Compares the DDE Jacobian interface with autodiff."
+        },
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math ed8059821a13821c646f66abfdd010a7758fa689, Linux x86_64, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "test/unit/math/rev/functor/cos_ode_typed_test.cpp",
+            "test/unit/math/rev/functor/ode_jacobian_cvodes_test.cpp",
+            "test/unit/math/rev/functor/ode_jacobian_check_cvodes_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "All 64 tests passed. The CVODES buffer-reuse regression checks repeated adjoint gradients against the analytic cosine solution. The solver tests compare user Jacobians with autodiff across data and variable inputs, and check that the optional Jacobian verifier rejects incorrect derivatives."
         }
       ]
     },
@@ -771,7 +782,12 @@
       "title": "Hand a thread's reverse-mode memory back to the operating system",
       "summary": "Feature. recover_memory() keeps every block of the autodiff arena and the storage of the variable lists, so a long-lived thread holds the memory of its largest gradient for as long as it lives. The C++ functions release_memory() and stack_alloc::release_pages() hand that physical memory back to the system while keeping it allocated for the next gradient. BridgeStan's bs_release_memory calls them.",
       "repairs": [],
-      "upstream_refs": [],
+      "upstream_refs": [
+        {
+          "url": "https://github.com/roualdes/bridgestan/issues/353",
+          "relation": "related"
+        }
+      ],
       "fix": {
         "branch": "dogfood",
         "commits": [
