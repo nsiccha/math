@@ -3,14 +3,14 @@
   "line": {
     "repo": "nsiccha/math",
     "ref": "dogfood",
-    "sha": "ed8059821a13821c646f66abfdd010a7758fa689"
+    "sha": "7aaf2f59b613fa573eabacf4e662171f34c55200"
   },
   "upstream": {
     "repo": "stan-dev/math",
     "ref": "develop",
     "sha": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b"
   },
-  "prepared_at": "2026-11-21T11:34:02Z",
+  "prepared_at": "2026-11-22T12:24:33Z",
   "problems": [
     {
       "id": "dde-core",
@@ -833,6 +833,95 @@
           ],
           "result": "passed",
           "detail": "13 and 3 tests passed, 13 and 4 with STAN_THREADS, on the Mac run that gated this publication. There the residency tests measure the process's memory footprint (phys_footprint): it falls by the released block and gradient and rises again once the memory is written."
+        }
+      ]
+    },
+    {
+      "id": "categorical-multinomial-zero-probability",
+      "role": "fix",
+      "title": "Array categorical_lpmf and multinomial_lpmf give NaN gradients at a zero probability that no outcome selects",
+      "summary": "The reverse-mode gradient of categorical_lpmf for an array of outcomes is NaN whenever the probability vector has an entry that is exactly zero, even when no outcome selects it. The value is correct and the scalar overload gives the correct gradient. multinomial_lpmf does the same for a zero count at a zero probability. Exact zeros appear when a probability underflows, as in a softmax with a very negative logit, and the NaN then reaches every parameter the simplex depends on. Upstream develop has this behaviour.",
+      "repairs": [],
+      "upstream_refs": [],
+      "draft": {
+        "title": "Array categorical_lpmf and multinomial_lpmf return NaN gradients when an unobserved category has probability zero",
+        "prepared_at": "2026-11-22T12:24:33Z",
+        "body": "## Description\n\nThe reverse-mode gradient of `categorical_lpmf` for an array of outcomes is NaN whenever the probability vector has an entry that is exactly zero, even when no outcome selects that entry. The log density itself is finite and correct, and the scalar overload gives the correct gradient for the same data. `multinomial_lpmf` does the same for a zero count at a zero probability.\n\nExact zeros appear in practice through underflow, for example in a softmax with one very negative logit. The NaN then reaches every parameter the simplex depends on.\n\nThe cause is a term with zero weight whose reverse pass divides zero by zero:\n\n- The array overload of `categorical_lpmf` takes `log(theta)` of every entry and then sums the entries that the outcomes select ([categorical_lpmf.hpp#L49-L57](https://github.com/stan-dev/math/blob/3d16e8f14e620e2cd35cc59bf92766ad98a9559b/stan/math/prim/prob/categorical_lpmf.hpp#L49-L57)). An entry that no outcome selects still leaves a `log` node on the tape. Its adjoint is 0, and the reverse pass of `log` adds `adj / val` ([rev/fun/log.hpp#L52-L55](https://github.com/stan-dev/math/blob/3d16e8f14e620e2cd35cc59bf92766ad98a9559b/stan/math/rev/fun/log.hpp#L52-L55)), which is `0 / 0` when the entry is exactly zero.\n- `multinomial_lpmf` adds `lmultiply(ns[i], theta[i])` for every category ([multinomial_lpmf.hpp#L38](https://github.com/stan-dev/math/blob/3d16e8f14e620e2cd35cc59bf92766ad98a9559b/stan/math/prim/prob/multinomial_lpmf.hpp#L38)). For a zero count at a zero probability the value is 0, but the reverse pass computes `adj * 0 / 0` ([rev/fun/lmultiply.hpp#L38](https://github.com/stan-dev/math/blob/3d16e8f14e620e2cd35cc59bf92766ad98a9559b/stan/math/rev/fun/lmultiply.hpp#L38)).\n\nThe scalar overload of `categorical_lpmf` reads only the selected entry, and `multinomial_logit_lpmf` already skips zero counts.\n\n## Example\n\n```cpp\n#include <stan/math.hpp>\n#include <iostream>\n#include <vector>\n\nint main() {\n  using stan::math::var;\n  using vector_v = Eigen::Matrix<var, Eigen::Dynamic, 1>;\n\n  {  // Array overload: category 1 has probability 0 and is never observed.\n    vector_v theta(3);\n    theta << 0.0, 0.6, 0.4;\n    std::vector<int> y{2, 3, 2};\n    var lp = stan::math::categorical_lpmf(y, theta);\n    lp.grad();\n    std::cout << \"categorical, array:   lp = \" << lp.val() << \"  grad = \"\n              << theta.adj().transpose() << \"\\n\";\n    stan::math::recover_memory();\n  }\n  {  // The same outcomes, one scalar call each.\n    vector_v theta(3);\n    theta << 0.0, 0.6, 0.4;\n    var lp = 0;\n    for (int y : {2, 3, 2}) {\n      lp += stan::math::categorical_lpmf(y, theta);\n    }\n    lp.grad();\n    std::cout << \"categorical, scalars: lp = \" << lp.val() << \"  grad = \"\n              << theta.adj().transpose() << \"\\n\";\n    stan::math::recover_memory();\n  }\n  {  // Multinomial: a zero count at a zero probability.\n    vector_v theta(3);\n    theta << 0.0, 0.6, 0.4;\n    std::vector<int> counts{0, 2, 3};\n    var lp = stan::math::multinomial_lpmf(counts, theta);\n    lp.grad();\n    std::cout << \"multinomial:          lp = \" << lp.val() << \"  grad = \"\n              << theta.adj().transpose() << \"\\n\";\n    stan::math::recover_memory();\n  }\n  {  // The zero depends on a parameter s; d lp / d s through the array call.\n    var s = 0.3;\n    var a = stan::math::exp(s - 2000);  // underflows to exactly 0\n    var p = stan::math::inv_logit(s);\n    vector_v theta(3);\n    theta << a, p, 1 - p - a;\n    var lp = stan::math::categorical_lpmf(std::vector<int>{2}, theta);\n    lp.grad();\n    std::cout << \"underflowed entry:    lp = \" << lp.val()\n              << \"  d lp / d s = \" << s.adj() << \"  (exact: \"\n              << 1 - p.val() << \")\\n\";\n    stan::math::recover_memory();\n  }\n  return 0;\n}\n```\n\nIn a Stan program the zero typically comes from underflow. In the model below the gradient with respect to `s` is NaN. With `2 ~ categorical(theta);` in place of the array statement it is finite.\n\n```stan\nparameters { real s; }\ntransformed parameters {\n  vector[3] theta = softmax([s - 1000, s, 0]');  // theta[1] underflows to 0\n}\nmodel {\n  s ~ normal(0, 1);\n  array[1] int y = {2};\n  y ~ categorical(theta);\n}\n```\n\n## Expected Output\n\nCurrent output of the C++ example on `develop` at 3d16e8f14e (Linux x86_64, GCC 15.2, `-O3`):\n\n```\ncategorical, array:   lp = -1.93794  grad =    -nan 3.33333     2.5\ncategorical, scalars: lp = -1.93794  grad =       0 3.33333     2.5\nmultinomial:          lp = -1.46794  grad =    -nan 3.33333     7.5\nunderflowed entry:    lp = -0.554355  d lp / d s = -nan  (exact: 0.425557)\n```\n\nExpected: `0` in place of `-nan` in the first and third lines, and `0.425557` in the last line.\n\n## Possible fix\n\nOne commit on top of `develop` at 3d16e8f14e: [nsiccha/math@79430e93e7](https://github.com/nsiccha/math/commit/79430e93e74198cbe75fd234d240f71daa87f394).\n\n- The array overload of `categorical_lpmf` counts the outcomes per category and builds one partials-propagator node, with value `sum_k c_k log(theta_k)` and partials `c_k / theta_k` over the observed categories only. That is one node in place of one `log` node per category and a sum over the outcomes.\n- `multinomial_lpmf` skips zero counts.\n\nValues are unchanged in both functions, and an observed category with probability zero still gives `-inf`. The commit adds four regression tests: a zero gradient at an unobserved zero entry, agreement with the scalar overload when the zero entry depends on a parameter, agreement with the sum of scalar calls, and the multinomial case. They fail on `develop` and pass with the change. With it the example prints `0`, `0`, `0` and `0.425557`, and all 43 tests in the prim, rev, fwd and mix `categorical`, `multinomial` and `dirichlet_multinomial` test files pass.\n\nThe commit does not change `lmultiply`: a direct `lmultiply(0, theta)` still has a NaN partial at `theta == 0`.\n\n#### Current Version:\nv5.4.0 (`develop` at 3d16e8f14e)"
+      },
+      "fix": {
+        "branch": "rebase/categorical-multinomial-zero-probability",
+        "commits": [
+          {
+            "sha": "79430e93e74198cbe75fd234d240f71daa87f394",
+            "title": "Keep unobserved zero probabilities out of categorical and multinomial gradients",
+            "original": [
+              "4e4080746a2d7bbb0921eb70102c73dad3c98cf8",
+              "7aaf2f59b613fa573eabacf4e662171f34c55200"
+            ]
+          }
+        ],
+        "why_together": "One commit on upstream develop: both densities and their regression tests. The two functions fail for the same reason, a term with zero weight whose reverse pass divides zero by zero. On the dogfood branch the same change is the commit written on the v5.3.0-based solver branch plus the merge that adapts its one multinomial line to develop's lmultiply. The four changed files are byte-identical on both."
+      },
+      "depends_on": [],
+      "requires": [],
+      "validation": [
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "stan-dev/math develop 3d16e8f14e620e2cd35cc59bf92766ad98a9559b, Linux x86_64, GCC 15.2.0, C++17, -O3",
+          "tests": [
+            "test/unit/math/rev/prob/categorical2_test.cpp",
+            "test/unit/math/rev/prob/multinomial_test.cpp",
+            "C++ example in the draft"
+          ],
+          "result": "failed",
+          "detail": "The example prints NaN for the unobserved zero entry of the array categorical call and of the multinomial call, and NaN for the derivative with respect to a parameter that the underflowed entry depends on (exact value 0.425557). The scalar calls print 0. Built against develop's headers, the four new regression tests fail with NaN adjoints, three in the categorical file and one in the multinomial file; the tests that develop already has pass."
+        },
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math 79430e93e74198cbe75fd234d240f71daa87f394 (develop plus the fix commit), Linux x86_64, GCC 15.2.0, C++17, -O3",
+          "tests": [
+            "test/unit/math/rev/prob/categorical2_test.cpp",
+            "test/unit/math/rev/prob/multinomial_test.cpp",
+            "test/unit/math/prim/prob/categorical_test.cpp",
+            "test/unit/math/prim/prob/multinomial_test.cpp",
+            "test/unit/math/prim/prob/dirichlet_multinomial_test.cpp",
+            "test/unit/math/fwd/prob/categorical_test.cpp",
+            "test/unit/math/fwd/prob/multinomial_test.cpp",
+            "test/unit/math/mix/prob/categorical_test.cpp",
+            "test/unit/math/mix/prob/multinomial_test.cpp",
+            "test/unit/math/mix/prob/dirichlet_multinomial_test.cpp",
+            "C++ example in the draft"
+          ],
+          "result": "passed",
+          "detail": "43 tests passed: rev 5 and 3; prim 6, 8 and 8; fwd 4 and 2; mix 4, 2 and 1. Both changed headers compile standalone. The example prints 0 for the unobserved zero entry in all three calls and 0.425557 for the parameter derivative."
+        },
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math 7aaf2f59b613fa573eabacf4e662171f34c55200 (dogfood), Linux x86_64, GCC 15.2.0, C++17, -O3",
+          "tests": [
+            "test/unit/math/rev/prob/categorical2_test.cpp",
+            "test/unit/math/rev/prob/multinomial_test.cpp",
+            "test/unit/math/prim/prob/categorical_test.cpp",
+            "test/unit/math/prim/prob/multinomial_test.cpp",
+            "test/unit/math/prim/prob/dirichlet_multinomial_test.cpp",
+            "test/unit/math/fwd/prob/categorical_test.cpp",
+            "test/unit/math/fwd/prob/multinomial_test.cpp",
+            "test/unit/math/mix/prob/categorical_test.cpp",
+            "test/unit/math/mix/prob/multinomial_test.cpp",
+            "test/unit/math/mix/prob/dirichlet_multinomial_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "The same 43 tests passed on the dogfood tip: rev 5 and 3; prim 6, 8 and 8; fwd 4 and 2; mix 4, 2 and 1. Built against the two density headers as they were before the merge, the four new regression tests fail with NaN adjoints."
+        },
+        {
+          "base": "a1810b7792bb61ecdb93f511a19cafe6d52beda2",
+          "native_build": "BridgeStan 2.9.0 with stanc3 v2.40.0 on Stan Math 74d1813da60169ccf55206f8fcce2fcb2857ad8f (dogfood), then with the two density headers replaced by the fixed ones, STAN_THREADS=true",
+          "tests": [
+            "Stan model in the draft",
+            "The same model with a multinomial statement for counts {0, 2, 1}"
+          ],
+          "result": "passed",
+          "detail": "At s = 0.3 the array categorical statement gave the gradient NaN before and 0.12555748318834098 after, equal to the scalar statement. The multinomial statement gave NaN before and -0.02332755043497703 after. The log densities are unchanged. Both headers were byte-identical to develop's before the change and to the fix commit's after it."
         }
       ]
     }
