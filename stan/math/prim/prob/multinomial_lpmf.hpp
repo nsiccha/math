@@ -35,7 +35,11 @@ inline return_type_t<T_prob> multinomial_lpmf(const std::vector<int>& ns,
   }
   if constexpr (include_summand<propto, T_prob>::value) {
     for (unsigned int i = 0; i < ns.size(); ++i) {
-      lp += lmultiply(ns[i], theta_ref.coeff(i));
+      // A zero count does not depend on theta[i]. Skipping it keeps a zero
+      // theta[i] from giving 0 * 0 / 0 = NaN in the reverse pass.
+      if (ns[i] != 0) {
+        lp += lmultiply(ns[i], theta_ref.coeff(i));
+      }
     }
   }
   return lp;
