@@ -3,14 +3,14 @@
   "line": {
     "repo": "nsiccha/math",
     "ref": "dogfood",
-    "sha": "b5ec5ff431fa865438a085206224b421afbac478"
+    "sha": "56b68ab5ac012f7b0abcad5ca8b038c5e65b6903"
   },
   "upstream": {
     "repo": "stan-dev/math",
     "ref": "develop",
     "sha": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b"
   },
-  "prepared_at": "2026-11-28T07:34:48Z",
+  "prepared_at": "2026-11-28T12:36:34Z",
   "problems": [
     {
       "id": "dde-core",
@@ -251,8 +251,8 @@
         {
           "name": "Embedded Torsten Math revision",
           "repo": "nsiccha/torsten_math",
-          "sha": "eb1ed6778ceb758578c12caf73be426e876cacef",
-          "why": "The current Math subtree exactly matches this Torsten revision, the tip of the Torsten fork's dogfood branch. The torsten-solver-jacobians record identifies the import of the optional Jacobian interfaces, the torsten-rk45-step-limit-exception record the import of the recoverable-error repair, and the torsten-rk45-comparison-tests record the import of the rk45 test tolerances."
+          "sha": "a70ec0ca6e960f2f202221ebce65f177f4d168bc",
+          "why": "The current Math subtree exactly matches this Torsten revision, the tip of the Torsten fork's dogfood branch. The torsten-solver-jacobians record identifies the import of the optional Jacobian interfaces, the torsten-rk45-step-limit-exception record the import of the recoverable-error fix, now upstream's, and the torsten-rk45-comparison-tests record the import of the rk45 test tolerances."
         },
         {
           "name": "Stan language signatures for the PMX DDE solver",
@@ -780,7 +780,7 @@
       "id": "torsten-rk45-step-limit-exception",
       "role": "fix",
       "title": "Chains stop when pmx_solve_rk45 runs out of steps",
-      "summary": "When pmx_solve_rk45 needs more than max_num_steps steps, boost's no_progress_error, a std::runtime_error, reaches Stan unchanged. Stan's samplers reject a proposal on std::domain_error and end the chain on any other exception, so a stiff proposal early in warmup stops the chain. The embedded Torsten integrator now reports the spent step budget as std::domain_error. Torsten v0.92.1 makes the same change upstream (metrumresearchgroup/Torsten 2b8db0eb, tag torsten_v0.92.1); metrumresearchgroup/torsten_math develop does not have it yet.",
+      "summary": "When pmx_solve_rk45 needs more than max_num_steps steps, boost's no_progress_error, a std::runtime_error, reaches Stan unchanged. Stan's samplers reject a proposal on std::domain_error and end the chain on any other exception, so a stiff proposal early in warmup stops the chain. Upstream fixed it in metrumresearchgroup/torsten_math develop f679e57 (\"fix rk45 max_step_num exception bug (#86)\"; also Torsten v0.92.1), and the embedded Torsten tree now runs upstream's integrator: it converts no_progress_error to std::domain_error. That replaced this fork's earlier repair, which converted every odeint_error.",
       "repairs": [],
       "upstream_refs": [
         {
@@ -797,19 +797,32 @@
             "original": [
               "e8fd7bfe89ec3126e33510e5c6bfe2517172d389"
             ]
+          },
+          {
+            "sha": "56b68ab5ac012f7b0abcad5ca8b038c5e65b6903",
+            "title": "Pull nsiccha/torsten_math dogfood a70ec0c (upstream's Torsten#86 fix) into the Torsten subtree",
+            "original": [
+              "56b68ab5ac012f7b0abcad5ca8b038c5e65b6903"
+            ]
           }
         ],
-        "why_together": "In Stan Math the subtree update is a single merge that imports both commits of the Torsten repair; its first-parent diff shows the imported changes. The rk45 change alone is the Torsten commit named under requires."
+        "why_together": "Two subtree merges in Stan Math. The first imported this fork's repair; the second imports the Torsten fork's merge of upstream's fix, whose code replaced the repair in the files both changed. Each merge's first-parent diff shows what it imported."
       },
       "depends_on": [
         "torsten-integration"
       ],
       "requires": [
         {
+          "name": "Upstream Torsten Math fix for Torsten#86",
+          "repo": "metrumresearchgroup/torsten_math",
+          "sha": "f679e574377fbe66f7acd53bce35701edf3149a4",
+          "why": "Upstream's fix on its develop branch. The embedded dsolve/pmx_odeint_integrator.hpp is identical to upstream's: it converts boost's no_progress_error with stan::math::throw_domain_error."
+        },
+        {
           "name": "Torsten rk45 step-limit repair",
           "repo": "nsiccha/torsten_math",
           "sha": "0ebe87e8a53e4d812286883faa39afe08a779667",
-          "why": "The integrator change and its two regression tests in one commit. It applies to metrumresearchgroup/torsten_math develop at bb8266ea unchanged."
+          "why": "This fork's repair and its two regression tests, imported by the first merge. Upstream's fix replaced its integrator change; the regression tests remain in pmx_ode_recoverable_error_test."
         }
       ],
       "validation": [
@@ -850,7 +863,25 @@
             "stan/math/torsten/test/unit/pmx_ode_recoverable_error_test.cpp"
           ],
           "result": "passed",
-          "detail": "rk45_step_budget and rk45_default_controls_on_a_stiff_system passed: the spent step budget arrives as a std::domain_error, and pmx_solve_bdf returns finite amounts for the same stiff parameters. Torsten's whole unit suite on this tree passed 2525 tests in 70 of its 73 files. The other three files compare Torsten's rk45 with Stan Math's rk45, which Stan Math 5.4.0 reimplemented on ARKODE, at 1e-10 or exact equality; they fail 21 tests identically without this pull."
+          "detail": "rk45_step_budget and rk45_default_controls_on_a_stiff_system passed: the spent step budget arrives as a std::domain_error, and pmx_solve_bdf returns finite amounts for the same stiff parameters. Torsten's whole unit suite on this tree passed 2525 tests in 70 of its 73 files. The other three files compare Torsten's rk45 with Stan Math's rk45, which Stan Math develop reimplemented on ARKODE in 030ed2a37e, after its 5.4.0 release, at 1e-10 or exact equality; they fail 21 tests identically without this pull."
+        },
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math 56b68ab5ac012f7b0abcad5ca8b038c5e65b6903 with the three Torsten headers of 7aaf2f59b613fa573eabacf4e662171f34c55200 (Torsten aa2b00e466, before any repair) put back, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_ode_recoverable_error_test.cpp"
+          ],
+          "result": "failed",
+          "detail": "With the unrepaired headers, rk45_default_controls_on_a_stiff_system and rk45_step_budget failed: pmx_solve_rk45 threw boost::odeint's no_progress_error, which is not a std::domain_error."
+        },
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math 56b68ab5ac012f7b0abcad5ca8b038c5e65b6903, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_ode_recoverable_error_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "rk45_default_controls_on_a_stiff_system and rk45_step_budget passed with upstream's integrator: the spent step budget arrives as a std::domain_error (\"Failed to integrate to next output time within N steps\"). Torsten's whole unit suite on this tree passed 2546 tests in all 73 files."
         }
       ]
     },
@@ -858,7 +889,7 @@
       "id": "torsten-steady-state-failure-exception",
       "role": "fix",
       "title": "A failed steady-state solve ends the chain instead of rejecting the proposal",
-      "summary": "The steady-state solves of Torsten's ODE and coupled models rethrow every failure as std::runtime_error, including the std::domain_error of an ODE integrator or of KINSOL that cannot handle the proposed values, so the sampler ends the chain. The handler is shared by ss = 1 records of the rk45, bdf, adams and coupled solvers. The embedded Torsten tree now keeps a std::domain_error as one. Torsten v0.92.1 repairs it upstream more broadly: its steady-state solves rethrow every failure as std::domain_error (metrumresearchgroup/Torsten 2b8db0eb, tag torsten_v0.92.1); metrumresearchgroup/torsten_math develop does not have it yet.",
+      "summary": "The steady-state solves of Torsten's ODE and coupled models rethrew every failure as std::runtime_error, including the std::domain_error of an ODE integrator or of KINSOL that cannot handle the proposed values, so the sampler ended the chain. The handler is shared by ss = 1 records of the rk45, bdf, adams and coupled solvers. The embedded Torsten tree now runs upstream's fix (metrumresearchgroup/torsten_math develop f679e57; also Torsten v0.92.1): every failure of a steady-state solve is a std::domain_error. That replaced this fork's narrower repair, which kept only a std::domain_error as one.",
       "repairs": [],
       "upstream_refs": [
         {
@@ -875,19 +906,32 @@
             "original": [
               "e8fd7bfe89ec3126e33510e5c6bfe2517172d389"
             ]
+          },
+          {
+            "sha": "56b68ab5ac012f7b0abcad5ca8b038c5e65b6903",
+            "title": "Pull nsiccha/torsten_math dogfood a70ec0c (upstream's Torsten#86 fix) into the Torsten subtree",
+            "original": [
+              "56b68ab5ac012f7b0abcad5ca8b038c5e65b6903"
+            ]
           }
         ],
-        "why_together": "The same subtree merge imports this commit after the rk45 change. In Torsten the two header changes stand alone; the tests extend the rk45 commit's test file, and the rk45 steady-state case needs its integrator change."
+        "why_together": "The first subtree merge imported this fork's repair after the rk45 change; the second imports upstream's fix, which replaced the repair in pmx_ode_model.hpp and pmx_coupled_model.hpp."
       },
       "depends_on": [
         "torsten-rk45-step-limit-exception"
       ],
       "requires": [
         {
+          "name": "Upstream Torsten Math fix for Torsten#86",
+          "repo": "metrumresearchgroup/torsten_math",
+          "sha": "f679e574377fbe66f7acd53bce35701edf3149a4",
+          "why": "Upstream's fix on its develop branch. The embedded pmx_ode_model.hpp and pmx_coupled_model.hpp take its change and differ from upstream's only by this line's earlier changes."
+        },
+        {
           "name": "Torsten steady-state exception repair",
           "repo": "nsiccha/torsten_math",
           "sha": "4601fbf94b61edcbc4370472bd540eef1b83c9c2",
-          "why": "The steady-state changes to pmx_ode_model.hpp and pmx_coupled_model.hpp with three tests. The header changes apply to metrumresearchgroup/torsten_math develop at bb8266ea on their own; the tests need the rk45 commit first."
+          "why": "This fork's repair and its three tests, imported by the first merge. Upstream's fix replaced its header changes; the tests remain."
         }
       ],
       "validation": [
@@ -929,14 +973,32 @@
           ],
           "result": "passed",
           "detail": "rk45_step_budget_in_steady_state, steady_state_solver_gives_up and coupled_steady_state_solver_gives_up passed: a failed steady-state solve of pmx_solve_rk45, pmx_solve_bdf and pmx_solve_onecpt_rk45 arrives as a std::domain_error."
+        },
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math 56b68ab5ac012f7b0abcad5ca8b038c5e65b6903 with the three Torsten headers of 7aaf2f59b613fa573eabacf4e662171f34c55200 (Torsten aa2b00e466, before any repair) put back, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_ode_recoverable_error_test.cpp"
+          ],
+          "result": "failed",
+          "detail": "With the unrepaired headers, coupled_steady_state_solver_gives_up, rk45_step_budget_in_steady_state and steady_state_solver_gives_up failed: the steady-state solves threw std::runtime_error."
+        },
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math 56b68ab5ac012f7b0abcad5ca8b038c5e65b6903, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/pmx_ode_recoverable_error_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "coupled_steady_state_solver_gives_up, rk45_step_budget_in_steady_state and steady_state_solver_gives_up passed with upstream's fix: a failed steady-state solve arrives as a std::domain_error."
         }
       ]
     },
     {
       "id": "torsten-rk45-comparison-tests",
       "role": "regression",
-      "title": "Torsten's rk45 tests fail against Stan Math 5.4.0's rk45",
-      "summary": "Since Stan Math 5.4.0, stan::math::integrate_ode_rk45 runs ARKODE's Dormand-Prince method, while Torsten's pmx_integrate_ode_rk45 still runs boost::odeint's. The two agree only to within their error control, so 21 Torsten tests that expected them to agree to float precision or to 1e-10 failed on this branch. The embedded Torsten tree now compares them at the solvers' tolerance; no solver code changes.",
+      "title": "Torsten's rk45 tests fail against the ARKODE rk45 of Stan Math develop",
+      "summary": "Stan Math develop replaced boost::odeint with ARKODE in ode_rk45 (030ed2a37e, October 2026), after its 5.4.0 release; this branch has that change, while Torsten's pmx_integrate_ode_rk45 still runs boost::odeint's. The two agree only to within their error control, so 21 Torsten tests that expected them to agree to float precision or to 1e-10 failed on this branch. The embedded Torsten tree now compares them at the solvers' tolerance; no solver code changes. Released Stan Math through 5.4.0 still runs boost::odeint in ode_rk45.",
       "repairs": [],
       "upstream_refs": [],
       "fix": {
@@ -983,6 +1045,17 @@
           ],
           "result": "passed",
           "detail": "Torsten's whole unit suite passed 2546 tests in all 73 files, including 18 of 18 in pmx_integrate_ode_rk45_test, 1 of 1 in generated_ode_functor_test and 11 of 11 in mpi_pmx_rk45_integrator_test."
+        },
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math 56b68ab5ac012f7b0abcad5ca8b038c5e65b6903, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/dsolve/pmx_integrate_ode_rk45_test.cpp",
+            "stan/math/torsten/test/unit/dsolve/generated_ode_functor_test.cpp",
+            "stan/math/torsten/test/unit/mpi/mpi_pmx_rk45_integrator_test.cpp"
+          ],
+          "result": "passed",
+          "detail": "On the tree with upstream's Torsten#86 fix the three files passed 18 of 18, 1 of 1 and 11 of 11, built without TORSTEN_MPI."
         }
       ]
     },
