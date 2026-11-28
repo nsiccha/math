@@ -4,10 +4,9 @@
 #include <stan/math/torsten/dsolve/pmx_ode_system.hpp>
 #include <stan/math/torsten/mpi/precomputed_gradients.hpp>
 #include <stan/math/torsten/dsolve/ode_observer.hpp>
+#include <stan/math/prim/err/throw_domain_error.hpp>
 #include <boost/numeric/odeint.hpp>
 #include <boost/numeric/odeint/external/eigen/eigen.hpp>
-#include <sstream>
-#include <stdexcept>
 #include <type_traits>
 
 namespace torsten {
@@ -54,25 +53,21 @@ namespace dsolve {
 
       const double init_dt = 0.1;
       // integrate_times(make_dense_output(atol_, rtol_, scheme_t()),
+      // Boost.odeint signals "max_num_steps exceeded" by throwing
+      // no_progress_error, which derives from std::runtime_error. Stan only
+      // treats std::domain_error as a recoverable rejection, so convert it
+      // here (same convention as stan::math::ode_rk45_tol_impl).
       try {
         integrate_times(make_stepper(scheme_t()),
                         boost::ref(ode), ode.y0_fwd_system,
                         ts_vec.begin(), ts_vec.end(),
                         init_dt, boost::ref(observer),
                         boost::numeric::odeint::max_step_checker(max_num_steps_));
-      } catch (const boost::numeric::odeint::odeint_error& e) {
-        // odeint reports a spent step budget (no_progress_error) and a
-        // step size it cannot find (step_adjustment_error) as
-        // std::runtime_error. Both mean that this ODE could not be
-        // integrated for these parameter values, so report them as
-        // std::domain_error, as stan::math::ode_rk45 and Torsten's CVODES
-        // integrators do: Stan's samplers reject the proposal on a
-        // std::domain_error and stop the chain on any other exception.
-        std::ostringstream msg;
-        msg << "Torsten odeint integrator failed to integrate from t = "
-            << ts_vec.front() << " to t = " << ts_vec.back()
-            << " with max_num_steps = " << max_num_steps_ << ": " << e.what();
-        throw std::domain_error(msg.str());
+      } catch (const boost::numeric::odeint::no_progress_error& e) {
+        stan::math::throw_domain_error("PMXOdeintIntegrator", "max_num_steps",
+                                       max_num_steps_,
+                                       "Failed to integrate to next output time within ",
+                                       " steps");
       }
 
       // integrate_times(make_controlled(absolute_tolerance, relative_tolerance,
