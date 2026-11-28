@@ -3,14 +3,14 @@
   "line": {
     "repo": "nsiccha/math",
     "ref": "dogfood",
-    "sha": "e8fd7bfe89ec3126e33510e5c6bfe2517172d389"
+    "sha": "b5ec5ff431fa865438a085206224b421afbac478"
   },
   "upstream": {
     "repo": "stan-dev/math",
     "ref": "develop",
     "sha": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b"
   },
-  "prepared_at": "2026-11-28T05:17:30Z",
+  "prepared_at": "2026-11-28T07:34:48Z",
   "problems": [
     {
       "id": "dde-core",
@@ -251,8 +251,8 @@
         {
           "name": "Embedded Torsten Math revision",
           "repo": "nsiccha/torsten_math",
-          "sha": "4601fbf94b61edcbc4370472bd540eef1b83c9c2",
-          "why": "The current Math subtree exactly matches this Torsten revision, the tip of the Torsten fork's dogfood branch. The torsten-solver-jacobians record identifies the import of the optional Jacobian interfaces, and the torsten-rk45-step-limit-exception record the import of the recoverable-error repair."
+          "sha": "eb1ed6778ceb758578c12caf73be426e876cacef",
+          "why": "The current Math subtree exactly matches this Torsten revision, the tip of the Torsten fork's dogfood branch. The torsten-solver-jacobians record identifies the import of the optional Jacobian interfaces, the torsten-rk45-step-limit-exception record the import of the recoverable-error repair, and the torsten-rk45-comparison-tests record the import of the rk45 test tolerances."
         },
         {
           "name": "Stan language signatures for the PMX DDE solver",
@@ -929,6 +929,60 @@
           ],
           "result": "passed",
           "detail": "rk45_step_budget_in_steady_state, steady_state_solver_gives_up and coupled_steady_state_solver_gives_up passed: a failed steady-state solve of pmx_solve_rk45, pmx_solve_bdf and pmx_solve_onecpt_rk45 arrives as a std::domain_error."
+        }
+      ]
+    },
+    {
+      "id": "torsten-rk45-comparison-tests",
+      "role": "regression",
+      "title": "Torsten's rk45 tests fail against Stan Math 5.4.0's rk45",
+      "summary": "Since Stan Math 5.4.0, stan::math::integrate_ode_rk45 runs ARKODE's Dormand-Prince method, while Torsten's pmx_integrate_ode_rk45 still runs boost::odeint's. The two agree only to within their error control, so 21 Torsten tests that expected them to agree to float precision or to 1e-10 failed on this branch. The embedded Torsten tree now compares them at the solvers' tolerance; no solver code changes.",
+      "repairs": [],
+      "upstream_refs": [],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "b5ec5ff431fa865438a085206224b421afbac478",
+            "title": "Pull nsiccha/torsten_math dogfood eb1ed67 (rk45 test tolerances) into the Torsten subtree",
+            "original": [
+              "b5ec5ff431fa865438a085206224b421afbac478"
+            ]
+          }
+        ],
+        "why_together": "In Stan Math the subtree update is a single merge that imports the one Torsten test commit; its first-parent diff shows the imported change. The Torsten commit itself is named under requires."
+      },
+      "depends_on": [
+        "torsten-integration"
+      ],
+      "requires": [
+        {
+          "name": "Torsten rk45 comparison tolerances",
+          "repo": "nsiccha/torsten_math",
+          "sha": "eb1ed6778ceb758578c12caf73be426e876cacef",
+          "why": "Adds test_val_tol and test_grad_tol to test/unit/test_util.hpp, which bound each value and each sensitivity by tol * (max(|a|, |b|) + 1), and uses them in every comparison with Stan Math's rk45: 1e-5 for sho, neutropenia and chem with sensitivities, 2e-4 for chem solved for values only, and 1e-3 for the chaotic Lorenz system. Comparisons of Torsten with itself keep their tight bounds."
+        }
+      ],
+      "validation": [
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math b5ec5ff431fa865438a085206224b421afbac478 with the four Torsten test files of e8fd7bfe89ec3126e33510e5c6bfe2517172d389 put back, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "stan/math/torsten/test/unit/dsolve/pmx_integrate_ode_rk45_test.cpp",
+            "stan/math/torsten/test/unit/dsolve/generated_ode_functor_test.cpp",
+            "stan/math/torsten/test/unit/mpi/mpi_pmx_rk45_integrator_test.cpp"
+          ],
+          "result": "failed",
+          "detail": "With the pre-pull test sources, 21 tests failed: 12 of 18 in pmx_integrate_ode_rk45_test, 1 of 1 in generated_ode_functor_test and 8 of 11 in mpi_pmx_rk45_integrator_test, built without TORSTEN_MPI. The same 21 tests failed on e8fd7bfe89."
+        },
+        {
+          "base": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b",
+          "native_build": "Stan Math b5ec5ff431fa865438a085206224b421afbac478, GCC 15.2.0, C++17, -O1, STAN_THREADS=true",
+          "tests": [
+            "Every test file under stan/math/torsten/test/unit (73 files)"
+          ],
+          "result": "passed",
+          "detail": "Torsten's whole unit suite passed 2546 tests in all 73 files, including 18 of 18 in pmx_integrate_ode_rk45_test, 1 of 1 in generated_ode_functor_test and 11 of 11 in mpi_pmx_rk45_integrator_test."
         }
       ]
     },
