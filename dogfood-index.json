@@ -10,7 +10,7 @@
     "ref": "develop",
     "sha": "3d16e8f14e620e2cd35cc59bf92766ad98a9559b"
   },
-  "prepared_at": "2026-11-28T05:11:46Z",
+  "prepared_at": "2026-11-28T05:17:30Z",
   "problems": [
     {
       "id": "dde-core",
@@ -780,7 +780,7 @@
       "id": "torsten-rk45-step-limit-exception",
       "role": "fix",
       "title": "Chains stop when pmx_solve_rk45 runs out of steps",
-      "summary": "When pmx_solve_rk45 needs more than max_num_steps steps, boost's no_progress_error, a std::runtime_error, reaches Stan unchanged. Stan's samplers reject a proposal on std::domain_error and end the chain on any other exception, so a stiff proposal early in warmup stops the chain. The embedded Torsten integrator now reports the spent step budget as std::domain_error.",
+      "summary": "When pmx_solve_rk45 needs more than max_num_steps steps, boost's no_progress_error, a std::runtime_error, reaches Stan unchanged. Stan's samplers reject a proposal on std::domain_error and end the chain on any other exception, so a stiff proposal early in warmup stops the chain. The embedded Torsten integrator now reports the spent step budget as std::domain_error. Torsten v0.92.1 makes the same change upstream (metrumresearchgroup/Torsten 2b8db0eb, tag torsten_v0.92.1); metrumresearchgroup/torsten_math develop does not have it yet.",
       "repairs": [],
       "upstream_refs": [
         {
@@ -788,11 +788,6 @@
           "relation": "reports"
         }
       ],
-      "draft": {
-        "title": "pmx_solve_rk45 throws std::runtime_error at its step limit, which ends the Stan chain",
-        "prepared_at": "2026-11-28T05:11:46Z",
-        "body": "In Torsten Math `develop` at `bb8266ea`, `PMXOdeintIntegrator::integrate` (`dsolve/pmx_odeint_integrator.hpp`) calls boost::odeint's `integrate_times` without a handler. When a solve needs more than `max_num_steps` steps, odeint's `no_progress_error`, a `std::runtime_error`, reaches Stan unchanged. Stan's samplers reject a proposal only when the gradient throws `std::domain_error` (`base_hamiltonian::update_potential_gradient` in Stan 2.40); any other exception ends the chain. So a proposal that makes the system stiff, such as a very large absorption rate early in warmup, stops the chain, although `pmx_solve_bdf` and `pmx_solve_onecpt` return values for it. This is the failure reported in metrumresearchgroup/Torsten#86.\n\n[This commit](https://github.com/nsiccha/torsten_math/commit/0ebe87e8a53e4d812286883faa39afe08a779667) catches `boost::numeric::odeint::odeint_error` around `integrate_times` and rethrows it as `std::domain_error`. It applies to `develop` unchanged and adds two regression tests. A C++ reproducer and its output before and after the change are in the [Torsten fork's problem index](https://github.com/nsiccha/torsten_math/blob/c0b6afa9368fba1dbba5c6251b62308a2b45f04a/dogfood-index.json)."
-      },
       "fix": {
         "branch": "dogfood",
         "commits": [
@@ -863,7 +858,7 @@
       "id": "torsten-steady-state-failure-exception",
       "role": "fix",
       "title": "A failed steady-state solve ends the chain instead of rejecting the proposal",
-      "summary": "The steady-state solves of Torsten's ODE and coupled models rethrow every failure as std::runtime_error, including the std::domain_error of an ODE integrator or of KINSOL that cannot handle the proposed values, so the sampler ends the chain. The handler is shared by ss = 1 records of the rk45, bdf, adams and coupled solvers. The embedded Torsten tree now keeps a std::domain_error as one.",
+      "summary": "The steady-state solves of Torsten's ODE and coupled models rethrow every failure as std::runtime_error, including the std::domain_error of an ODE integrator or of KINSOL that cannot handle the proposed values, so the sampler ends the chain. The handler is shared by ss = 1 records of the rk45, bdf, adams and coupled solvers. The embedded Torsten tree now keeps a std::domain_error as one. Torsten v0.92.1 repairs it upstream more broadly: its steady-state solves rethrow every failure as std::domain_error (metrumresearchgroup/Torsten 2b8db0eb, tag torsten_v0.92.1); metrumresearchgroup/torsten_math develop does not have it yet.",
       "repairs": [],
       "upstream_refs": [
         {
@@ -871,11 +866,6 @@
           "relation": "related"
         }
       ],
-      "draft": {
-        "title": "A failed steady-state solve throws std::runtime_error, which ends the Stan chain",
-        "prepared_at": "2026-11-28T05:11:46Z",
-        "body": "In Torsten Math `develop` at `bb8266ea`, `PKODEModel` and `PKCoupledModel` (`pmx_ode_model.hpp`, `pmx_coupled_model.hpp`) solve steady-state records (`ss = 1`) in a `try` block whose handler rethrows every `std::exception` as `std::runtime_error(\"Failed to find steady state, ...\")`. That includes the `std::domain_error` that an ODE integrator or KINSOL throws when it cannot handle the proposed parameter values. Stan's samplers reject a proposal only when the gradient throws `std::domain_error` (`base_hamiltonian::update_potential_gradient` in Stan 2.40), so such a proposal ends the chain. The handler is shared by the `ss = 1` records of `pmx_solve_rk45`, `pmx_solve_bdf`, `pmx_solve_adams` and the coupled solvers. It is the steady-state counterpart of metrumresearchgroup/Torsten#86.\n\n[This commit](https://github.com/nsiccha/torsten_math/commit/4601fbf94b61edcbc4370472bd540eef1b83c9c2) rethrows a `std::domain_error` as `std::domain_error` with the same text, and any other exception as `std::runtime_error` as before. Its two header changes apply to `develop` on their own; its three tests extend the file that the [rk45 step-limit change](https://github.com/nsiccha/torsten_math/commit/0ebe87e8a53e4d812286883faa39afe08a779667) adds. A C++ reproducer and its output before and after the change are in the [Torsten fork's problem index](https://github.com/nsiccha/torsten_math/blob/c0b6afa9368fba1dbba5c6251b62308a2b45f04a/dogfood-index.json)."
-      },
       "fix": {
         "branch": "dogfood",
         "commits": [
