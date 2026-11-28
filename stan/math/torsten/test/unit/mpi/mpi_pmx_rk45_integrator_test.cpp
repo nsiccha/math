@@ -27,6 +27,11 @@ using stan::math::matrix_v;
 using stan::math::var;
 using std::vector;
 
+// stan::math::integrate_ode_rk45 is a different rk45 implementation from
+// Torsten's since Stan Math 5.4.0 (ARKODE instead of boost::odeint), so
+// comparisons with it use test_val_tol/test_grad_tol at the bounds documented
+// in test_util.hpp. Comparisons of Torsten with itself stay tight.
+
 #if defined(STAN_LANG_MPI) || defined(TORSTEN_MPI)
 TORSTEN_MPI_SESSION_INIT;
 #endif
@@ -53,7 +58,7 @@ TEST_F(TorstenOdeTest_chem, group_rk45_ivp) {
   int icol = 0;
   for (size_t i = 0; i < np; ++i) {
     Eigen::MatrixXd y_i = y_m.block(0, icol, y0.size(), len[i]);
-    torsten::test::test_val(y, y_i);
+    torsten::test::test_val_tol(y, y_i, torsten::test::rk45_vs_stan_tol_stiff);
     icol += len[i];
   }
 }
@@ -92,10 +97,10 @@ TEST_F(TorstenOdeTest_chem, group_rk45_fwd_sensitivity_theta) {
 
   int icol = 0;
   y = y_m.block(0, icol, y0.size(), len[0]);
-  torsten::test::test_grad(theta_var1, theta_var_m[0], y1, y, 1e-7, 1e-6);
+  torsten::test::test_grad_tol(theta_var1, theta_var_m[0], y1, y, torsten::test::rk45_vs_stan_tol);
   icol += len[0];
   y = y_m.block(0, icol, y0.size(), len[1]);
-  torsten::test::test_grad(theta_var2, theta_var_m[1], y2, y, 1e-7, 1e-6);
+  torsten::test::test_grad_tol(theta_var2, theta_var_m[1], y2, y, torsten::test::rk45_vs_stan_tol);
 
   icol = 0;
   y = y_m.block(0, icol, y0.size(), len[0]);
@@ -156,7 +161,7 @@ TEST_F(TorstenOdeTest_neutropenia, group_rk45_fwd_sensitivity_theta) {
   int icol = 0;
   for (int i = 0; i < np; ++i) {
     matrix_v y_i = y_m.block(0, icol, y0.size(), len[i]);
-    torsten::test::test_grad(theta_var, theta_var_m[i], y, y_i, 1e-8, 1e-8);
+    torsten::test::test_grad_tol(theta_var, theta_var_m[i], y, y_i, torsten::test::rk45_vs_stan_tol);
     icol += len[i];
   }
 }
@@ -183,7 +188,7 @@ TEST_F(TorstenOdeTest_sho, group_rk45_fwd_sensitivity_theta) {
   int icol = 0;
   for (int i = 0; i < np; ++i) {
     matrix_v y_i = y_m.block(0, icol, y0.size(), len[i]);
-    torsten::test::test_grad(theta_var, theta_var_m[i], y, y_i, 1e-8, 1e-6);
+    torsten::test::test_grad_tol(theta_var, theta_var_m[i], y, y_i, torsten::test::rk45_vs_stan_tol);
     icol += len[i];
   }
 }
@@ -264,7 +269,7 @@ TEST_F(TorstenOdeTest_sho, group_rk45_fwd_sensitivity_y0) {
   int icol = 0;
   for (int i = 0; i < np; ++i) {
     matrix_v y_i = y_m.block(0, icol, y0.size(), len[i]);
-    torsten::test::test_grad(y0_var, y0_var_m[i], y, y_i, 1e-16, 1e-16);
+    torsten::test::test_grad_tol(y0_var, y0_var_m[i], y, y_i, torsten::test::rk45_vs_stan_tol);
     icol += len[i];
   }
 }
@@ -296,7 +301,7 @@ TEST_F(TorstenOdeTest_sho, group_rk45_fwd_sensitivity_y0_theta) {
     matrix_v y_i = y_m.block(0, icol, y0.size(), len[i]);
     vector<var> vars_i = y0_var_m[i];
     vars_i.insert(vars_i.end(), theta_var_m[i].begin(), theta_var_m[i].end());
-    torsten::test::test_grad(vars, vars_i, y, y_i, 1e-14, 1e-14);
+    torsten::test::test_grad_tol(vars, vars_i, y, y_i, torsten::test::rk45_vs_stan_tol);
     icol += len[i];
   }
 }
@@ -328,7 +333,7 @@ TEST_F(TorstenOdeTest_chem, group_rk45_fwd_sensitivity_y0_theta) {
     matrix_v y_i = y_m.block(0, icol, y0.size(), len[i]);
     vector<var> vars_i = y0_var_m[i];
     vars_i.insert(vars_i.end(), theta_var_m[i].begin(), theta_var_m[i].end());
-    torsten::test::test_grad(vars, vars_i, y, y_i, 2e-14, 1e-12);
+    torsten::test::test_grad_tol(vars, vars_i, y, y_i, torsten::test::rk45_vs_stan_tol);
     icol += len[i];
   }
 }
@@ -360,7 +365,7 @@ TEST_F(TorstenOdeTest_neutropenia, group_rk45_fwd_sensitivity_y0_theta) {
     matrix_v y_i = y_m.block(0, icol, y0.size(), len[i]);
     vector<var> vars_i = y0_var_m[i];
     vars_i.insert(vars_i.end(), theta_var_m[i].begin(), theta_var_m[i].end());
-    torsten::test::test_grad(vars, vars_i, y, y_i, 1e-12, 1e-9);
+    torsten::test::test_grad_tol(vars, vars_i, y, y_i, torsten::test::rk45_vs_stan_tol);
     icol += len[i];
   }
 }

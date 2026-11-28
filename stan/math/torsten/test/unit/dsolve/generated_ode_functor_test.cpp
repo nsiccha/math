@@ -49,6 +49,10 @@ inline auto torsten::dsolve::pmx_ode_group_mpi_functor::operator()(Args&&... arg
     return f(std::forward<Args>(args)...);
 }
 
+// stan::math::integrate_ode_rk45 is a different rk45 implementation from
+// Torsten's since Stan Math 5.4.0 (ARKODE instead of boost::odeint), so
+// comparisons with it use test_val_tol/test_grad_tol at the bounds documented
+// in test_util.hpp. Comparisons of Torsten with itself stay tight.
 using stan::math::integrate_ode_rk45;
 using torsten::pmx_integrate_ode_rk45;
 using stan::math::var;
@@ -75,24 +79,24 @@ TEST_F(TorstenOdeTest_sho, fwd_sensitivity_theta_y0) {
     torsten::dsolve::pmx_ode_group_mpi_functor f_gen(1);
     std::vector<std::vector<stan::math::var>> y1 = integrate_ode_rk45(f2, y0_var1, t0, ts, theta_var1, x_r, x_i);
     std::vector<std::vector<stan::math::var>> y2 = pmx_integrate_ode_rk45(f_gen, y0_var2, t0, ts, theta_var2, x_r, x_i);
-    torsten::test::test_grad(y0_var1, y0_var2, y1, y2, 1.E-10, 1.E-8);
-    torsten::test::test_grad(theta_var1, theta_var2, y1, y2, 1.E-10, 1.E-8);
+    torsten::test::test_grad_tol(y0_var1, y0_var2, y1, y2, torsten::test::rk45_vs_stan_tol);
+    torsten::test::test_grad_tol(theta_var1, theta_var2, y1, y2, torsten::test::rk45_vs_stan_tol);
   }
 
   {
     torsten::dsolve::pmx_ode_group_mpi_functor f_gen(0);
     std::vector<std::vector<stan::math::var>> y1 = integrate_ode_rk45(f1, y0_var1, t0, ts, theta_var1, x_r, x_i);
     std::vector<std::vector<stan::math::var>> y2 = pmx_integrate_ode_rk45(f_gen, y0_var2, t0, ts, theta_var2, x_r, x_i);
-    torsten::test::test_grad(y0_var1, y0_var2, y1, y2, 1.E-10, 1.E-8);
-    torsten::test::test_grad(theta_var1, theta_var2, y1, y2, 1.E-10, 1.E-8);
+    torsten::test::test_grad_tol(y0_var1, y0_var2, y1, y2, torsten::test::rk45_vs_stan_tol);
+    torsten::test::test_grad_tol(theta_var1, theta_var2, y1, y2, torsten::test::rk45_vs_stan_tol);
   }
 
   {
     torsten::dsolve::pmx_ode_group_mpi_functor f_gen(1);
     std::vector<std::vector<stan::math::var>> y1 = integrate_ode_rk45(f2, y0_var1, t0, ts, theta_var1, x_r, x_i);
     std::vector<std::vector<stan::math::var>> y2 = pmx_integrate_ode_rk45(f_gen, y0_var2, t0, ts, theta_var2, x_r, x_i);
-    torsten::test::test_grad(y0_var1, y0_var2, y1, y2, 1.E-10, 1.E-8);
-    torsten::test::test_grad(theta_var1, theta_var2, y1, y2, 1.E-10, 1.E-8);    
+    torsten::test::test_grad_tol(y0_var1, y0_var2, y1, y2, torsten::test::rk45_vs_stan_tol);
+    torsten::test::test_grad_tol(theta_var1, theta_var2, y1, y2, torsten::test::rk45_vs_stan_tol);    
   }
 
 }

@@ -1100,6 +1100,132 @@ namespace torsten {
       }
     }
 
+    /*
+     * Bounds for comparing Torsten's rk45 with Stan Math's when both run at
+     * the default rtol = atol = 1e-6, in the form of expect_near_tol. Since
+     * Stan Math 5.4.0, stan::math::integrate_ode_rk45 runs ARKODE's
+     * Dormand-Prince method rather than boost::odeint's, so the two agree
+     * only to within the error each solver makes, not to the last bits.
+     * Measured on Stan Math 5.4.0 in units of the solver tolerance, against a
+     * 1e-12 reference that both solvers reach to about 1e-12:
+     *  - sho, neutropenia, and chem with sensitivities: the two differ by at
+     *    most 3.5 and their errors add up to at most 4.5, so the bound is 10.
+     *    Scaling Torsten's right-hand side by 1.01 moves them at least 780.
+     *  - chem solved for values only (stiff: atol lets the small middle
+     *    species carry a few percent error, which the coupling passes on):
+     *    they differ by 51, their errors add up to 69, and the 1.01 scaling
+     *    moves them 830, so the bound is 200.
+     *  - the chaotic Lorenz system: they differ by at most 60, their errors
+     *    add up to about 950, and the 1.01 scaling moves them 375000, so the
+     *    bound is 1000.
+     * Comparisons of Torsten with itself keep their tight bounds.
+     */
+    constexpr double rk45_vs_stan_tol = 1e-5;
+    constexpr double rk45_vs_stan_tol_stiff = 2e-4;
+    constexpr double rk45_vs_stan_tol_chaotic = 1e-3;
+
+    /*
+     * Expect |a - b| <= tol * (max(|a|, |b|) + 1): a relative bound for
+     * large values and an absolute one for small values.
+     */
+    inline void expect_near_tol(double a, double b, double tol) {
+      EXPECT_NEAR(a, b, tol * (std::max(std::abs(a), std::abs(b)) + 1.0));
+    }
+
+    /*
+     * Compare two solutions of one initial value problem computed by
+     * different integrators, value by value, with @c expect_near_tol.
+     *
+     * @param y1 one solution, indexed [time][state]
+     * @param y2 the other solution, same shape
+     * @param tol bound, see @c rk45_vs_stan_tol
+     */
+    inline void test_val_tol(const std::vector<std::vector<double>>& y1,
+                             const std::vector<std::vector<double>>& y2,
+                             double tol) {
+      EXPECT_EQ(y1.size(), y2.size());
+      for (size_t i = 0; i < y1.size(); ++i) {
+        EXPECT_EQ(y1[i].size(), y2[i].size());
+        for (size_t j = 0; j < y1[i].size(); ++j) {
+          expect_near_tol(y1[i][j], y2[i][j], tol);
+        }
+      }
+    }
+
+    /*
+     * As above, with @c y2 a matrix holding one column per time.
+     */
+    inline void test_val_tol(const std::vector<std::vector<double>>& y1,
+                             const Eigen::MatrixXd& y2, double tol) {
+      EXPECT_EQ(y1.size(), y2.cols());
+      for (size_t i = 0; i < y1.size(); ++i) {
+        EXPECT_EQ(y1[i].size(), y2.rows());
+        for (int j = 0; j < y2.rows(); ++j) {
+          expect_near_tol(y1[i][j], y2(j, i), tol);
+        }
+      }
+    }
+
+    /*
+     * Compare the values and the sensitivities of two solutions of one
+     * initial value problem computed by different integrators, each with
+     * @c expect_near_tol.
+     *
+     * @param theta1 parameters @c y1 is differentiated with respect to
+     * @param theta2 parameters @c y2 is differentiated with respect to
+     * @param y1 one solution, indexed [time][state]
+     * @param y2 the other solution, same shape
+     * @param tol bound, see @c rk45_vs_stan_tol
+     */
+    inline void test_grad_tol(std::vector<stan::math::var>& theta1,
+                              std::vector<stan::math::var>& theta2,
+                              std::vector<std::vector<stan::math::var>>& y1,
+                              std::vector<std::vector<stan::math::var>>& y2,
+                              double tol) {
+      EXPECT_EQ(theta1.size(), theta2.size());
+      EXPECT_EQ(y1.size(), y2.size());
+      std::vector<double> g1, g2;
+      for (size_t i = 0; i < y1.size(); ++i) {
+        EXPECT_EQ(y1[i].size(), y2[i].size());
+        for (size_t j = 0; j < y1[i].size(); ++j) {
+          expect_near_tol(y1[i][j].val(), y2[i][j].val(), tol);
+          stan::math::set_zero_all_adjoints();
+          y1[i][j].grad(theta1, g1);
+          stan::math::set_zero_all_adjoints();
+          y2[i][j].grad(theta2, g2);
+          for (size_t m = 0; m < theta1.size(); ++m) {
+            expect_near_tol(g1[m], g2[m], tol);
+          }
+        }
+      }
+    }
+
+    /*
+     * As above, with @c y2 a matrix holding one column per time.
+     */
+    inline void test_grad_tol(std::vector<stan::math::var>& theta1,
+                              std::vector<stan::math::var>& theta2,
+                              std::vector<std::vector<stan::math::var>>& y1,
+                              Eigen::Matrix<stan::math::var, -1, -1>& y2,
+                              double tol) {
+      EXPECT_EQ(theta1.size(), theta2.size());
+      EXPECT_EQ(y1.size(), y2.cols());
+      std::vector<double> g1, g2;
+      for (size_t i = 0; i < y1.size(); ++i) {
+        EXPECT_EQ(y1[i].size(), y2.rows());
+        for (size_t j = 0; j < y1[i].size(); ++j) {
+          expect_near_tol(y1[i][j].val(), y2(j, i).val(), tol);
+          stan::math::set_zero_all_adjoints();
+          y1[i][j].grad(theta1, g1);
+          stan::math::set_zero_all_adjoints();
+          y2(j, i).grad(theta2, g2);
+          for (size_t m = 0; m < theta1.size(); ++m) {
+            expect_near_tol(g1[m], g2[m], tol);
+          }
+        }
+      }
+    }
+
   } // namespace test
 }
 
