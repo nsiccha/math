@@ -284,10 +284,6 @@ namespace torsten {
 
       const double init_dt = (rate == 0.0 || ii > 0) ? ii_dbl : 24.0;
 
-      const char *ss_failure_text =
-        "Torsten failed to find steady state, due to "
-        "either system's intrinsic lack of such a state "
-        "or improper algebra solver controls. Details: ";
       try {
         PMXOdeFunctorCouplingAdaptor<T_m, F> f(f_);
         PMXOdeFunctorCouplingSSAdaptor<T_m, F, integrator_type> fss(f_, integrator);
@@ -310,12 +306,12 @@ namespace torsten {
         res.head(nPK) = pk_model.solve(t0, amt, rate, ii, cmt);
 
         return res;
-      } catch (const std::domain_error& e) {
-        // A std::domain_error stays one, so that Stan's samplers reject
-        // the proposal; see PKODEModel's steady-state solve.
-        throw std::domain_error(std::string(ss_failure_text) + e.what());
       } catch (const std::exception& e) {
-        throw std::runtime_error(std::string(ss_failure_text) + e.what());
+        const char *text =
+          "Torsten failed to find steady state, due to "
+          "either system's intrinsic lack of such a state "
+          "or improper algebra solver controls. Details: ";
+        throw std::domain_error(std::string(text) + e.what());
       }
     }
   };

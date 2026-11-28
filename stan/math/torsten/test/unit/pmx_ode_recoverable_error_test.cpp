@@ -131,14 +131,14 @@ TEST_F(TorstenOdeRecoverableError, rk45_step_budget) {
                                 params<var>(truth), biovar, tlag, tol, tol,
                                 steps, nullptr);
       },
-      "Max number of iterations exceeded (20)"));
+      "Failed to integrate to next output time within 20 steps"));
   EXPECT_TRUE(throws_domain_error(
       [&] {
         torsten::pmx_solve_rk45(f, 2, time, amt, rate, ii, evid, cmt, addl, ss,
                                 params<double>(truth), biovar, tlag, tol, tol,
                                 steps, nullptr);
       },
-      "Max number of iterations exceeded (20)"));
+      "Failed to integrate to next output time within 20 steps"));
 }
 
 /* What a sampler meets early in warmup: an absorption rate so high that
@@ -151,7 +151,7 @@ TEST_F(TorstenOdeRecoverableError, rk45_default_controls_on_a_stiff_system) {
         torsten::pmx_solve_rk45(f, 2, time, amt, rate, ii, evid, cmt, addl, ss,
                                 params<var>(stiff), biovar, tlag, nullptr);
       },
-      "Max number of iterations exceeded (1000000)"));
+      "Failed to integrate to next output time within 1000000 steps"));
 
   auto x = torsten::pmx_solve_bdf(f, 2, time, amt, rate, ii, evid, cmt, addl,
                                   ss, params<var>(stiff), biovar, tlag,
