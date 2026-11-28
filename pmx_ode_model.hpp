@@ -479,6 +479,10 @@ namespace torsten {
       using fss_func_t = PMXOdeFunctorSSAdaptor<F, integrator_type>;
       // fss_func_t fss(f_, par_, amt, rate, ii, cmt, ncmt_, integrator);
       fss_func_t fss(f_, integrator);
+      const char *ss_failure_text =
+        "Failed to find steady state, due to "
+        "either system's intrinsic lack of such a state "
+        "or improper algebra solver controls. \nDetails: ";
       try {
 #ifdef TORSTEN_AS_POWELL
       return solve_powell_tol(fss, integrate(t0, rate_vec, init_dbl, init_dt, integrator),
@@ -501,12 +505,13 @@ namespace torsten {
                                            integrator.as_rtol, integrator.as_atol, integrator.as_max_num_step,
                                            nullptr, par_, amt, rate, ii, cmt, x_r_, x_i_);
 #endif
+      } catch (const std::domain_error& e) {
+        // A std::domain_error stays one: the ODE or algebra solver could
+        // not handle these parameter values, which Stan's samplers answer
+        // by rejecting the proposal. Any other exception stops the chain.
+        throw std::domain_error(std::string(ss_failure_text) + e.what());
       } catch (const std::exception& e) {
-        const char *text =
-          "Failed to find steady state, due to "
-          "either system's intrinsic lack of such a state "
-          "or improper algebra solver controls. \nDetails: ";
-        throw std::runtime_error(std::string(text) + e.what());
+        throw std::runtime_error(std::string(ss_failure_text) + e.what());
       }
     }
   };
